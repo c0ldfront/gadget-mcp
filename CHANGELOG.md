@@ -3,7 +3,7 @@
 All notable changes to `gadget-mcp` are documented here. Format adheres to
 [Keep a Changelog][kac] and versions follow [semver][semver].
 
-## [Unreleased]
+## [0.2.0] — 2026-04-14
 
 ### Added
 
