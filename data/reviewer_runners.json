@@ -1,0 +1,30 @@
+[
+	{
+		"id": "claude",
+		"name": "Claude Code CLI",
+		"command": ["claude", "-p"],
+		"enabled": true,
+		"timeoutSeconds": 180
+	},
+	{
+		"id": "codex",
+		"name": "Codex CLI",
+		"command": ["codex", "exec", "--color", "never", "--output-last-message", "{output_file}", "-"],
+		"enabled": true,
+		"timeoutSeconds": 180
+	},
+	{
+		"id": "gemini",
+		"name": "Gemini CLI",
+		"command": ["gemini", "-p"],
+		"enabled": true,
+		"timeoutSeconds": 180
+	},
+	{
+		"id": "llamacpp",
+		"name": "llama.cpp local",
+		"command": ["llama-cli", "--file", "{input_file}"],
+		"enabled": false,
+		"timeoutSeconds": 300
+	}
+]

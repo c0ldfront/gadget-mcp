@@ -1,0 +1,54 @@
+{
+	"name": "gadget-mcp",
+	"version": "0.1.0",
+	"type": "module",
+	"private": true,
+	"description": "Return-prompt MCP server managing a persistent library of reusable prompt gadgets and reviewer runners with compose-prompt tooling",
+	"license": "MIT",
+	"author": "David Mydlarz",
+	"homepage": "https://github.com/c0ldfront/gadget-mcp",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/c0ldfront/gadget-mcp.git"
+	},
+	"bugs": {
+		"url": "https://github.com/c0ldfront/gadget-mcp/issues"
+	},
+	"workspaces": [
+		"packages/*"
+	],
+	"bin": {
+		"gadget-mcp": "./packages/server/src/cli.ts"
+	},
+	"scripts": {
+		"dev": "bun --hot ./packages/server/src/cli.ts",
+		"start": "bun ./packages/server/src/cli.ts",
+		"test": "bun test packages tests/e2e.test.ts tests/e2e-http.test.ts tests/live/harness.test.ts tests/live/harnesses bench",
+		"test:coverage": "bun test --coverage packages tests/e2e.test.ts tests/e2e-http.test.ts tests/live/harness.test.ts tests/live/harnesses bench",
+		"test:live": "GADGET_LIVE_TESTS=1 bun test tests/live/discovery.test.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check",
+		"fix": "biome check --write",
+		"check": "bun run lint && bun run typecheck && bun run test",
+		"bench": "bun run bench/all.bench.ts",
+		"bench:baseline": "bun run bench/all.bench.ts --write-baseline",
+		"forge": "bun run forge.ts"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.11",
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.9.3"
+	},
+	"forge": {
+		"entry": "./packages/server/src/cli.ts",
+		"binary": "gadget-mcp",
+		"targets": "all",
+		"outDir": "./target"
+	}
+}

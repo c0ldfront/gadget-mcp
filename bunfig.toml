@@ -1,0 +1,36 @@
+# Bun configuration for gadget-mcp.
+# Reference: https://bun.sh/docs/runtime/bunfig
+
+[install]
+# Keep local `bun install` ergonomic so `bun add` works while iterating.
+# CI enforces lockfile discipline directly via `bun install --frozen-lockfile`.
+frozenLockfile = false
+
+[run]
+# Force the bun runtime for every `bun run <script>` — never fall back to
+# node if a shebang asks for it. Guards against accidental Node.js
+# resolution on hosts where both runtimes are on PATH.
+bun = true
+
+[test]
+# Coverage reporting is OFF by default so TDD loops stay fast. Enable
+# on-demand via `bun run test:coverage` — reports to coverage/lcov.info
+# and prints a text summary. CI uploads the lcov as a workflow artifact
+# for visibility.
+#
+# No coverageThreshold is set yet: several modules (stdio.ts, the live
+# harness adapters) only run via spawned subprocesses that the coverage
+# tracer doesn't enter. Raise this as a ratchet once the reporting
+# stabilises on real CI numbers.
+coverage = false
+coverageSkipTestFiles = true
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+coveragePathIgnorePatterns = [
+  "node_modules/",
+  "dist/",
+  "target/",
+  "artifacts/",
+  "bench/",
+  "tests/live/harnesses/",
+]

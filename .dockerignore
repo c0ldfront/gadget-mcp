@@ -1,0 +1,13 @@
+# Build-context allowlist for the multi-stage Dockerfile. Everything NOT
+# listed here is excluded from the daemon upload — keeps builds fast and
+# prevents host `artifacts/`, `target/`, and local state from leaking in.
+
+**
+!package.json
+!bun.lock
+!tsconfig.json
+!biome.json
+!bunfig.toml
+!forge.ts
+!packages
+!data

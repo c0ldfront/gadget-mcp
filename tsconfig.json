@@ -1,0 +1,34 @@
+{
+	"compilerOptions": {
+		"lib": ["ESNext"],
+		"target": "ESNext",
+		"module": "Preserve",
+		"moduleDetection": "force",
+		"allowJs": false,
+		"types": ["bun"],
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+		"noEmit": true,
+		"strict": true,
+		"skipLibCheck": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noImplicitReturns": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noPropertyAccessFromIndexSignature": false,
+		"paths": {
+			"@gadget/core": ["./packages/core/src/index.ts"],
+			"@gadget/core/*": ["./packages/core/src/*"]
+		}
+	},
+	"include": [
+		"packages/core/src/**/*.ts",
+		"packages/server/src/**/*.ts",
+		"tests/**/*.ts",
+		"bench/**/*.ts",
+		"forge.ts"
+	]
+}

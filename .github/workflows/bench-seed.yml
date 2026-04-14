@@ -1,0 +1,53 @@
+name: bench-seed
+
+# Manually-dispatched workflow that runs the benchmark suite on a fresh
+# GitHub Actions runner, writes a CI-sourced bench/baseline.json, and
+# opens a pull request containing the updated file. Baselines committed
+# via this workflow reflect the same hardware the CI gate will run on —
+# never re-baseline from a developer machine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Short note for the PR body (why re-baseline?)"
+        required: false
+        default: "Periodic re-baseline on ubuntu-latest."
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bench-seed-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Record baseline
+        run: bun run bench:baseline
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bench/baseline-${{ github.run_id }}
+          commit-message: "chore(bench): re-baseline on GitHub Actions runner"
+          title: "chore(bench): re-baseline on GitHub Actions runner"
+          labels: bench
+          body: |
+            Automated re-baseline of `bench/baseline.json`.
+
+            Captured on: `ubuntu-latest` via workflow run
+            [#${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+            **Note from requester:** ${{ inputs.note }}
+
+            Review the diff. A regression-driven re-baseline must include a
+            commit body explaining the intentional hot-path change.
