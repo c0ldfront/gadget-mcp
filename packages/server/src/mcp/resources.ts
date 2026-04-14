@@ -1,4 +1,9 @@
-import { GADGET_CATEGORIES, type GadgetRepo, type ReviewerRunnerRepo } from "@gadget/core";
+import {
+	GADGET_CATEGORIES,
+	type GadgetRepo,
+	type ReviewerRunnerRepo,
+	toListItem,
+} from "@gadget/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { completeCategory, completeGadgetId, completeRunnerId, completeTag } from "./completers.ts";
@@ -41,7 +46,7 @@ export function registerResources(server: McpServer, ctx: ResourceContext): void
 			description: "Summary of every gadget in the library (no content payload).",
 			mimeType: "application/json",
 		},
-		(uri) => jsonResource(uri, { items: ctx.repo.list({ limit: 200 }).items }),
+		(uri) => jsonResource(uri, { items: ctx.repo.list({ limit: 200 }).items.map(toListItem) }),
 	);
 
 	server.registerResource(
@@ -127,8 +132,9 @@ export function registerResources(server: McpServer, ctx: ResourceContext): void
 				raw !== undefined && (GADGET_CATEGORIES as readonly string[]).includes(raw) ? raw : null;
 			if (cat === null) return jsonResource(uri, { items: [] });
 			return jsonResource(uri, {
-				items: ctx.repo.list({ limit: 200, category: cat as (typeof GADGET_CATEGORIES)[number] })
-					.items,
+				items: ctx.repo
+					.list({ limit: 200, category: cat as (typeof GADGET_CATEGORIES)[number] })
+					.items.map(toListItem),
 			});
 		},
 	);
@@ -151,7 +157,10 @@ export function registerResources(server: McpServer, ctx: ResourceContext): void
 		(uri, vars) => {
 			const tag = firstVar(vars, "tag");
 			if (tag === undefined) return jsonResource(uri, { items: [] });
-			const all = ctx.repo.list({ limit: 500 }).items.filter((s) => s.tags.includes(tag));
+			const all = ctx.repo
+				.list({ limit: 500 })
+				.items.filter((s) => s.tags.includes(tag))
+				.map(toListItem);
 			return jsonResource(uri, { items: all });
 		},
 	);

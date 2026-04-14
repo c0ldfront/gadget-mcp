@@ -139,7 +139,10 @@ export class MetricsRegistry {
 export interface GadgetMetrics {
 	readonly registry: MetricsRegistry;
 	recordToolCall(tool: string, resultCode: string, durationSeconds: number): void;
+	recordGadgetContentChars(tool: string, chars: number): void;
 }
+
+const CONTENT_CHARS_BUCKETS: readonly number[] = [50, 100, 200, 400, 800, 1200, 2000, 4000, 8000];
 
 function count(db: Db, table: string): number {
 	try {
@@ -159,6 +162,11 @@ export function buildGadgetMetrics(db: Db): GadgetMetrics {
 	registry.registerHistogram(
 		"gadget_tool_call_duration_seconds",
 		"Tool invocation latency in seconds.",
+	);
+	registry.registerHistogram(
+		"gadget_content_chars",
+		"Character length of gadget content on mutating writes.",
+		CONTENT_CHARS_BUCKETS,
 	);
 	registry.registerGauge("gadget_gadgets_total", "Live gadgets in store.", () =>
 		count(db, "gadgets"),
@@ -184,6 +192,10 @@ export function buildGadgetMetrics(db: Db): GadgetMetrics {
 				{ name: "gadget_tool_call_duration_seconds", labels: { tool } },
 				durationSeconds,
 			);
+		},
+		recordGadgetContentChars(tool, chars): void {
+			if (!Number.isFinite(chars) || chars < 0) return;
+			registry.observeHistogram({ name: "gadget_content_chars", labels: { tool } }, chars);
 		},
 	};
 }

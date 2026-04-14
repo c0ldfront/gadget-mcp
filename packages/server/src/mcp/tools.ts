@@ -3,18 +3,24 @@ import {
 	COMPOSE_ORDER,
 	executeReviewerRun,
 	exportNdjson,
+	GADGET_CONTENT_MAX,
+	GADGET_DESCRIPTION_MAX,
+	GADGET_TITLE_MAX,
 	GadgetCategorySchema,
 	GadgetInputSchema,
 	type GadgetMetrics,
 	type GadgetRepo,
+	GadgetTagSchema,
 	importNdjson,
 	type ReviewerRunnerRepo,
+	toListItem,
 } from "@gadget/core";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type CallToolResult, ListRootsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { type Role, roleAllows, TOOL_REQUIRED_ROLES } from "./auth.ts";
 import { GADGET_ERROR_CODES, gadgetMcpError, resultCodeOf, toMcpError } from "./errors.ts";
+import { assertGadgetShape } from "./gadget-shape.ts";
 
 export interface ToolContext {
 	readonly repo: GadgetRepo;
@@ -40,6 +46,12 @@ function affectsResources(name: string): boolean {
 	return MUTATION_TOOLS.has(name);
 }
 
+function contentCharsOf(args: unknown): number | undefined {
+	if (typeof args !== "object" || args === null) return undefined;
+	const c = (args as { content?: unknown }).content;
+	return typeof c === "string" ? c.length : undefined;
+}
+
 function jsonContent(value: unknown): CallToolResult["content"] {
 	return [{ type: "text", text: JSON.stringify(value, null, 2) }];
 }
@@ -48,8 +60,52 @@ function structured(value: Record<string, unknown>): CallToolResult {
 	return { content: jsonContent(value), structuredContent: value };
 }
 
-const GadgetIdParam = z.string().min(1);
+const GadgetIdParam = z.string().min(1).describe("Gadget id (lowercase kebab-case) or alias.");
 const CategoryEnum = GadgetCategorySchema;
+
+// ── shared output-schema shapes ─────────────────────────────────────────────
+const GadgetListItemOutput = {
+	id: z.string().describe("Gadget id."),
+	category: CategoryEnum.describe("Canonical prompt slot."),
+	title: z.string().describe("Human-readable title."),
+	description: z.string().describe("One-line summary of what this gadget does."),
+	tags: z.array(z.string()).describe("Lowercase kebab-case tags."),
+	content: z.string().describe("Full gadget body — use this to calibrate the house shape."),
+};
+
+const GadgetFullOutput = {
+	id: z.string(),
+	category: CategoryEnum,
+	title: z.string(),
+	description: z.string(),
+	content: z.string(),
+	tags: z.array(z.string()),
+	source: z.enum(["curated", "generated"]),
+	createdAt: z.number(),
+	updatedAt: z.number(),
+	aliases: z.array(z.string()).describe("Former ids that resolve to this gadget."),
+};
+
+const RevisionSummaryOutput = {
+	version: z.number().int().positive().describe("Monotonically increasing revision number."),
+	createdAt: z.number().int().nonnegative().describe("Unix epoch ms when this revision landed."),
+	title: z.string(),
+	description: z.string(),
+};
+
+const ComposeChainItemOutput = {
+	id: z.string(),
+	category: CategoryEnum,
+	title: z.string(),
+};
+
+const RunnerOutput = {
+	id: z.string(),
+	name: z.string(),
+	command: z.array(z.string()),
+	enabled: z.boolean(),
+	timeoutSeconds: z.number().int().positive().nullable(),
+};
 
 export interface HandlerExtra {
 	readonly signal?: AbortSignal;
@@ -86,6 +142,10 @@ function wrapHandler<A extends object>(
 			const durationSeconds = (performance.now() - started) / 1000;
 			ctx.metrics.recordToolCall(name, code, durationSeconds);
 			const gadgetId = gadgetIdOf !== undefined ? gadgetIdOf(args) : undefined;
+			const contentChars = mutating ? contentCharsOf(args) : undefined;
+			if (contentChars !== undefined) {
+				ctx.metrics.recordGadgetContentChars(name, contentChars);
+			}
 			ctx.audit.record({
 				actor: ctx.actor,
 				tool: name,
@@ -100,6 +160,7 @@ function wrapHandler<A extends object>(
 					resultCode: code,
 					durationMs: Math.round(durationSeconds * 1000),
 					...(gadgetId !== undefined ? { gadgetId } : {}),
+					...(contentChars !== undefined ? { contentChars } : {}),
 				};
 				extra
 					.sendNotification({
@@ -166,13 +227,37 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			{
 				title: "List reusable prompt gadgets",
 				description:
-					"Browse the library of reusable prompt components (role, context, task, constraint, format, example, reasoning, tone, caveat). Call this first when a user asks you to build or author a system prompt / persona / reviewer template. Keyset-paginated; filter by category to narrow.",
+					"Browse the library of reusable prompt components (role, context, task, constraint, format, example, reasoning, tone, caveat). Each item includes the full `content` body so you can see the house shape before composing or authoring. Call this first when a user asks you to build or author a system prompt / persona / reviewer template. Keyset-paginated; filter by category to narrow.",
 				inputSchema: {
-					category: CategoryEnum.optional(),
-					limit: z.number().int().positive().max(200).optional(),
-					cursor: z.string().optional(),
+					category: CategoryEnum.optional().describe(
+						"Restrict the page to one canonical slot (role, context, task, constraint, format, example, reasoning, tone, caveat).",
+					),
+					limit: z
+						.number()
+						.int()
+						.positive()
+						.max(200)
+						.optional()
+						.describe("Page size, 1–200. Defaults to 50."),
+					cursor: z
+						.string()
+						.optional()
+						.describe("Opaque cursor from a prior response's `nextCursor` to continue pagination."),
 				},
-				annotations: { readOnlyHint: true, idempotentHint: true },
+				outputSchema: {
+					items: z.array(z.object(GadgetListItemOutput)),
+					nextCursor: z
+						.string()
+						.nullable()
+						.describe(
+							"Pass this back as `cursor` to fetch the next page; null when the page is last.",
+						),
+				},
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{
 				category?: z.infer<typeof CategoryEnum>;
@@ -185,7 +270,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 					...(args.cursor !== undefined ? { cursor: args.cursor } : {}),
 				});
 				return structured({
-					items: page.items,
+					items: page.items.map(toListItem),
 					nextCursor: page.nextCursor,
 				});
 			}),
@@ -198,14 +283,36 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			{
 				title: "Search prompt gadgets by keyword",
 				description:
-					"Full-text search (BM25 over FTS5) across gadget id, title, description, content, and tags. Use this to find relevant prompt components when the user's ask names a domain, persona, or workflow keyword.",
+					"Full-text search (BM25 over FTS5) across gadget id, title, description, content, and tags. Each hit includes the full `content` body. Use this to find relevant prompt components when the user's ask names a domain, persona, or workflow keyword.",
 				inputSchema: {
-					query: z.string().min(1),
-					category: CategoryEnum.optional(),
-					limit: z.number().int().positive().max(200).optional(),
-					cursor: z.string().optional(),
+					query: z
+						.string()
+						.min(1)
+						.describe(
+							"BM25 keyword query. Supports FTS5 syntax (terms, phrases in quotes, prefix with *, AND/OR).",
+						),
+					category: CategoryEnum.optional().describe("Restrict hits to one canonical slot."),
+					limit: z
+						.number()
+						.int()
+						.positive()
+						.max(200)
+						.optional()
+						.describe("Page size, 1–200. Defaults to 50."),
+					cursor: z
+						.string()
+						.optional()
+						.describe("Opaque cursor from a prior response; must be paired with the same `query`."),
 				},
-				annotations: { readOnlyHint: true, idempotentHint: true },
+				outputSchema: {
+					items: z.array(z.object(GadgetListItemOutput)),
+					nextCursor: z.string().nullable(),
+				},
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{
 				query: string;
@@ -219,7 +326,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 					...(args.limit !== undefined ? { limit: args.limit } : {}),
 					...(args.cursor !== undefined ? { cursor: args.cursor } : {}),
 				});
-				return structured({ items: page.items, nextCursor: page.nextCursor });
+				return structured({
+					items: page.items.map(toListItem),
+					nextCursor: page.nextCursor,
+				});
 			}),
 		);
 	}
@@ -229,9 +339,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.get-gadget",
 			{
 				title: "Get gadget",
-				description: "Retrieve the full gadget (including content) by id or alias.",
+				description:
+					"Retrieve the full gadget (including the complete content body and aliases) by id or alias. Call this when you need the actual content of a specific gadget — list/search only return previews.",
 				inputSchema: { id: GadgetIdParam },
-				annotations: { readOnlyHint: true, idempotentHint: true },
+				outputSchema: { gadget: z.object(GadgetFullOutput) },
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ id: string }>(
 				server,
@@ -256,20 +372,70 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 
 	const AddInputSchema = {
 		id: GadgetIdParam,
-		category: CategoryEnum,
-		title: z.string().min(1).max(200),
-		description: z.string().min(1).max(500),
-		content: z.string().min(1),
-		tags: z.array(z.string()).optional(),
+		category: CategoryEnum.describe(
+			"Canonical slot this gadget fills. Pick the most specific match — do not default to `context` for persona material (that is `role`).",
+		),
+		title: z
+			.string()
+			.min(1)
+			.max(GADGET_TITLE_MAX)
+			.describe(
+				`Human-readable title, ≤${GADGET_TITLE_MAX} chars. Describes the gadget, not its content.`,
+			),
+		description: z
+			.string()
+			.min(1)
+			.max(GADGET_DESCRIPTION_MAX)
+			.describe(
+				`One-line summary of what this gadget does, ≤${GADGET_DESCRIPTION_MAX} chars. Describes the gadget, not its content.`,
+			),
+		content: z
+			.string()
+			.min(1)
+			.max(GADGET_CONTENT_MAX)
+			.describe(
+				`The gadget body. TARGET ~150 chars, ceiling ${GADGET_CONTENT_MAX}. One focused idea; split if longer than ~250.`,
+			),
+		tags: z
+			.array(GadgetTagSchema)
+			.optional()
+			.describe("Lowercase kebab-case tags (e.g. `bun`, `low-power`). ≤40 chars each."),
 	};
+
+	const AddOutput = {
+		id: z.string(),
+		version: z.number().int().positive(),
+	};
+	const PutOutput = {
+		id: z.string(),
+		version: z.number().int().positive(),
+		created: z.boolean().describe("True when this call created the gadget; false when it updated."),
+	};
+
+	const AUTHORING_RULES = [
+		"Add a SINGLE-PURPOSE gadget — one focused rule, persona primer, pattern, or snippet.",
+		`TARGET ~150 characters of content. HARD CEILING: ${GADGET_CONTENT_MAX}. If your draft runs past ~250 chars you are almost certainly packing multiple ideas — split.`,
+		"House-style exemplars (curated library): 'Be maximally concise. Omit preamble, summaries, and filler. Every sentence must carry information.' (98 chars). 'You are an expert low-level AI embedded systems engineer. You specialize in firmware, RTOS, bare-metal C/C++, hardware interfacing, and microcontroller architectures (ARM Cortex-M, RISC-V, AVR). You think in cycles, memory maps, and interrupt vectors.' (251 chars). Match that density.",
+		"Before writing, call `gadget.list-gadgets` (each item includes the full `content`) to see the shape; calibrate to it.",
+		"Do NOT pack multiple rules, layout diagrams, examples, and reasoning into one gadget. Split them into separate gadgets, one per category.",
+		"Prose only. ≤2 markdown headings, ≤1 fenced code block — and the server rejects more. Reserve the one fence for example/format gadgets.",
+		`Keep title ≤${String(GADGET_TITLE_MAX)} chars and description ≤${String(GADGET_DESCRIPTION_MAX)} chars; both describe what the gadget IS, not what it says.`,
+	].join(" ");
 
 	if (isToolAllowed(role, "gadget.add-gadget")) {
 		server.registerTool(
 			"gadget.add-gadget",
 			{
 				title: "Add gadget",
-				description: "Add a new gadget. Fails if id already exists.",
+				description: `Add a new single-purpose gadget. Fails if id already exists (use \`put-gadget\` to upsert). ${AUTHORING_RULES}`,
 				inputSchema: AddInputSchema,
+				outputSchema: AddOutput,
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{
 				id: string;
@@ -288,6 +454,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 						tags: [],
 						...args,
 					});
+					assertGadgetShape(input.content);
 					const res = ctx.repo.add(input);
 					return structured({ id: res.gadget.id, version: res.version });
 				},
@@ -301,8 +468,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.put-gadget",
 			{
 				title: "Put gadget",
-				description: "Create or update a gadget; always writes a new revision.",
+				description: `Create-or-update a single-purpose gadget; always writes a new revision (old versions remain listed via \`list-revisions\` and are rollback-able). ${AUTHORING_RULES}`,
 				inputSchema: AddInputSchema,
+				outputSchema: PutOutput,
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{
 				id: string;
@@ -321,6 +495,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 						tags: [],
 						...args,
 					});
+					assertGadgetShape(input.content);
 					const res = ctx.repo.put(input);
 					return structured({
 						id: res.gadget.id,
@@ -338,8 +513,23 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.rename-gadget",
 			{
 				title: "Rename gadget",
-				description: "Rename a gadget; the old id is preserved as an alias.",
-				inputSchema: { id: GadgetIdParam, newId: GadgetIdParam },
+				description:
+					"Rename a gadget. The old id is preserved as an alias so existing compose chains and saved prompts keep resolving. Fails if `newId` collides with another gadget or an existing alias.",
+				inputSchema: {
+					id: GadgetIdParam.describe("Current gadget id or alias to rename."),
+					newId: z.string().min(1).describe("New id (lowercase kebab-case, unique, ≤64 chars)."),
+				},
+				outputSchema: {
+					id: z.string(),
+					previousName: z.string().describe("The id this gadget had before the rename."),
+					aliases: z.array(z.string()).describe("All aliases currently resolving to this gadget."),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ id: string; newId: string }>(
 				server,
@@ -363,8 +553,32 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.rollback-gadget",
 			{
 				title: "Rollback gadget",
-				description: "Roll the live gadget back to a prior revision (creates a new revision).",
-				inputSchema: { id: GadgetIdParam, toVersion: z.number().int().positive() },
+				description:
+					"Roll the live gadget back to a prior revision by copying the older snapshot's content/title/description/tags forward as a brand-new revision. History is preserved — the rolled-past revisions stay listed.",
+				inputSchema: {
+					id: GadgetIdParam.describe("Gadget id or alias."),
+					toVersion: z
+						.number()
+						.int()
+						.positive()
+						.describe(
+							"Target revision number to restore. See `list-revisions` for available versions.",
+						),
+				},
+				outputSchema: {
+					id: z.string(),
+					newVersion: z
+						.number()
+						.int()
+						.positive()
+						.describe("The version number assigned to the rollback revision."),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ id: string; toVersion: number }>(
 				server,
@@ -384,9 +598,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.list-revisions",
 			{
 				title: "List revisions",
-				description: "List immutable revision snapshots for a gadget, newest first.",
+				description:
+					"List immutable revision snapshots for a gadget (newest first). Each revision captures title/description/content/tags at the time of the write; use `rollback-gadget` with one of these `version` numbers to restore.",
 				inputSchema: { id: GadgetIdParam },
-				annotations: { readOnlyHint: true },
+				outputSchema: { revisions: z.array(z.object(RevisionSummaryOutput)) },
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ id: string }>(
 				server,
@@ -412,9 +632,20 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.delete-gadget",
 			{
 				title: "Delete gadget",
-				description: "Delete a gadget and cascade revisions and aliases.",
+				description:
+					"Delete a gadget and cascade its revisions and aliases. DESTRUCTIVE and NOT RECOVERABLE from within this server (you'd need an external NDJSON backup). Confirm intent before calling.",
 				inputSchema: { id: GadgetIdParam },
-				annotations: { destructiveHint: true },
+				outputSchema: {
+					deleted: z
+						.boolean()
+						.describe("Always true on success; failure surfaces as a `gadget.notFound` error."),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ id: string }>(
 				server,
@@ -437,9 +668,33 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 				description:
 					"Stitch the chosen prompt gadgets into a single, paste-ready system prompt. This is the ANSWER tool when the user asks for 'a system prompt for X', 'a persona that Y', 'a reviewer template that Z', etc. Order of gadgetIds is load-bearing; pass them in canonical order (role \u2192 context \u2192 task \u2192 constraint \u2192 format \u2192 example \u2192 reasoning \u2192 tone \u2192 caveat) or set useCanonicalOrder=true to let the server reorder. Unknown ids surface as `gadget.composeMissingIds` with the bad ids.",
 				inputSchema: {
-					gadgetIds: z.array(z.string()).min(1),
-					separator: z.string().optional(),
-					useCanonicalOrder: z.boolean().optional(),
+					gadgetIds: z
+						.array(z.string())
+						.min(1)
+						.describe(
+							"Gadget ids or aliases to compose. Order is preserved unless `useCanonicalOrder` is true.",
+						),
+					separator: z
+						.string()
+						.optional()
+						.describe("Joiner between gadget bodies. Defaults to a blank line (\\n\\n)."),
+					useCanonicalOrder: z
+						.boolean()
+						.optional()
+						.describe(
+							"When true, the server groups ids by category and emits them in canonical order (role → context → task → constraint → format → example → reasoning → tone → caveat).",
+						),
+				},
+				outputSchema: {
+					prompt: z.string().describe("Final composed system prompt, ready to paste."),
+					chain: z
+						.array(z.object(ComposeChainItemOutput))
+						.describe("The gadgets that contributed, in the final output order."),
+				},
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
 				},
 			},
 			wrapHandler<{
@@ -478,12 +733,24 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.export-gadgets",
 			{
 				title: "Export gadgets (NDJSON)",
-				description: "Export library as NDJSON with optional revision history.",
+				description:
+					"Export the live gadget library as newline-delimited JSON, one gadget per line. Useful for backups or porting to another workspace. Set `includeHistory` to also emit revision snapshots.",
 				inputSchema: {
-					includeHistory: z.boolean().optional(),
-					category: CategoryEnum.optional(),
+					includeHistory: z
+						.boolean()
+						.optional()
+						.describe("When true, include all prior revisions (one extra line per revision)."),
+					category: CategoryEnum.optional().describe("Limit export to gadgets in one slot."),
 				},
-				annotations: { readOnlyHint: true },
+				outputSchema: {
+					ndjson: z.string().describe("The NDJSON payload (may be empty if no gadgets match)."),
+					count: z.number().int().nonnegative().describe("Number of lines emitted."),
+				},
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ includeHistory?: boolean; category?: z.infer<typeof CategoryEnum> }>(
 				server,
@@ -507,10 +774,39 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.import-gadgets",
 			{
 				title: "Import gadgets (NDJSON)",
-				description: "Import from NDJSON with conflict policy skip|overwrite|error.",
+				description:
+					"Import gadgets from a newline-delimited JSON payload (the format `export-gadgets` emits). `conflict` controls id collisions.",
 				inputSchema: {
-					ndjson: z.string().min(1),
-					conflict: z.enum(["skip", "overwrite", "error"]).optional(),
+					ndjson: z
+						.string()
+						.min(1)
+						.describe("NDJSON payload; one gadget per line (same shape as the export output)."),
+					conflict: z
+						.enum(["skip", "overwrite", "error"])
+						.optional()
+						.describe(
+							"`skip` (default) keeps existing gadgets; `overwrite` writes a new revision; `error` fails the whole import on the first collision.",
+						),
+				},
+				outputSchema: {
+					imported: z.number().int().nonnegative().describe("Newly created gadgets."),
+					overwritten: z
+						.number()
+						.int()
+						.nonnegative()
+						.describe("Existing gadgets updated in place."),
+					skipped: z.number().int().nonnegative(),
+					errors: z
+						.array(z.string())
+						.describe(
+							"Per-line errors (malformed JSON, id collisions under `error` policy, etc.).",
+						),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
 				},
 			},
 			wrapHandler<{ ndjson: string; conflict?: "skip" | "overwrite" | "error" }>(
@@ -538,8 +834,14 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.list-runners",
 			{
 				title: "List reviewer runners",
-				description: "List configured reviewer runners.",
-				annotations: { readOnlyHint: true, idempotentHint: true },
+				description:
+					"List configured reviewer runners (external review commands — claude, codex, gemini, or local scripts). Use alongside `run-reviewer` to feed a composed prompt through one of them.",
+				outputSchema: { runners: z.array(z.object(RunnerOutput)) },
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<Record<string, never>>(server, ctx, "gadget.list-runners", () =>
 				structured({ runners: ctx.runnerRepo.list() }),
@@ -554,7 +856,19 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 				title: "List client-advertised filesystem roots",
 				description:
 					"Query the connected MCP client for its advertised filesystem roots (MCP `roots/list`). Returns an empty list when the client does not support roots. Used as an observability signal; gadget-mcp does not constrain its own storage based on the result.",
-				annotations: { readOnlyHint: true, idempotentHint: true },
+				outputSchema: {
+					roots: z
+						.array(z.unknown())
+						.describe("Raw MCP Root entries as reported by the client, or [] if unsupported."),
+					supported: z
+						.boolean()
+						.describe("True when the client responded to `roots/list`; false otherwise."),
+				},
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<Record<string, never>>(
 				server,
@@ -584,13 +898,39 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.upsert-runner",
 			{
 				title: "Upsert reviewer runner",
-				description: "Create or update a reviewer runner definition.",
+				description:
+					"Create or update a reviewer runner definition. A runner is an external process (argv array) the server can invoke via `run-reviewer` to review a prompt. `command[0]` must resolve on PATH.",
 				inputSchema: {
-					id: z.string().min(1),
-					name: z.string().min(1),
-					command: z.array(z.string()).min(1),
-					enabled: z.boolean().optional(),
-					timeoutSeconds: z.number().int().positive().optional(),
+					id: z
+						.string()
+						.min(1)
+						.describe("Stable identifier for this runner (e.g. `claude`, `codex`, `gemini`)."),
+					name: z.string().min(1).describe("Human-readable display name."),
+					command: z
+						.array(z.string())
+						.min(1)
+						.describe(
+							"Argv for the reviewer process, first element is the executable (no shell expansion).",
+						),
+					enabled: z
+						.boolean()
+						.optional()
+						.describe(
+							"When false, `run-reviewer` refuses to execute this runner. Defaults to true.",
+						),
+					timeoutSeconds: z
+						.number()
+						.int()
+						.positive()
+						.optional()
+						.describe("Max wall-clock seconds per run. Omit to use server default (180s)."),
+				},
+				outputSchema: { id: z.string() },
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false,
 				},
 			},
 			wrapHandler<{
@@ -617,9 +957,22 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.delete-runner",
 			{
 				title: "Delete reviewer runner",
-				description: "Delete a reviewer runner definition.",
-				inputSchema: { id: z.string() },
-				annotations: { destructiveHint: true },
+				description:
+					"Delete a reviewer runner definition. Running reviews are not affected; future `run-reviewer` calls for this id will fail with `gadget.runnerMissing`.",
+				inputSchema: {
+					id: z.string().min(1).describe("Runner id to remove."),
+				},
+				outputSchema: {
+					deleted: z
+						.boolean()
+						.describe("True when a row was removed; false if the id did not exist."),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: true,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
 			},
 			wrapHandler<{ id: string }>(server, ctx, "gadget.delete-runner", (args) =>
 				structured({ deleted: ctx.runnerRepo.delete(args.id) }),
@@ -632,11 +985,36 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			"gadget.run-reviewer",
 			{
 				title: "Run reviewer runner",
-				description: "Execute a reviewer runner against a prompt.",
+				description:
+					"Execute a reviewer runner against a prompt. The runner subprocess receives `prompt` on stdin and its stdout/stderr are returned. Respects the caller's AbortSignal and enforces a wall-clock timeout.",
 				inputSchema: {
+					runnerId: z
+						.string()
+						.min(1)
+						.describe("Id of a previously-upserted runner (see `list-runners`)."),
+					prompt: z.string().min(1).describe("Prompt text to pipe into the runner's stdin."),
+					timeoutSeconds: z
+						.number()
+						.int()
+						.positive()
+						.optional()
+						.describe("Per-call override of the runner's configured timeout."),
+				},
+				outputSchema: {
 					runnerId: z.string(),
-					prompt: z.string().min(1),
-					timeoutSeconds: z.number().int().positive().optional(),
+					status: z
+						.string()
+						.describe("One of `ok`, `timeout`, `exited`, `error` — see docs for semantics."),
+					exitCode: z.number().int().nullable().describe("Process exit code, or null on timeout."),
+					output: z.string().describe("Captured stdout."),
+					stderr: z.string().describe("Captured stderr."),
+					durationMs: z.number().int().nonnegative(),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: true,
 				},
 			},
 			wrapHandler<{ runnerId: string; prompt: string; timeoutSeconds?: number }>(

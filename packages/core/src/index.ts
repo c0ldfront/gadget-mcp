@@ -27,15 +27,21 @@ export {
 	TooManyAliasesError,
 } from "./domain/errors.ts";
 export {
+	GADGET_CONTENT_MAX,
+	GADGET_DESCRIPTION_MAX,
+	GADGET_TITLE_MAX,
 	type Gadget,
 	type GadgetInput,
 	GadgetInputSchema,
+	type GadgetListItem,
+	GadgetListItemSchema,
 	GadgetSchema,
 	type GadgetSummary,
 	GadgetSummarySchema,
 	GadgetTagSchema,
 	type Revision,
 	RevisionSchema,
+	toListItem,
 	toSummary,
 } from "./domain/gadget.ts";
 export {
@@ -93,4 +99,11 @@ export {
 	type ReviewerRunResult,
 	type RunnerInput,
 } from "./services/reviewer-runner.ts";
-export { type SeedSummary, seedFromFiles } from "./services/seed.ts";
+export {
+	type SeedContent,
+	type SeedSummary,
+	seedFromContent,
+	seedFromFiles,
+	seedGadgetsFromNdjson,
+	seedRunnersFromJson,
+} from "./services/seed.ts";

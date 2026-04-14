@@ -1,4 +1,11 @@
-import { GADGET_CATEGORIES, type GadgetRepo, type ReviewerRunnerRepo } from "@gadget/core";
+import {
+	GADGET_CATEGORIES,
+	GADGET_CONTENT_MAX,
+	GADGET_DESCRIPTION_MAX,
+	GADGET_TITLE_MAX,
+	type GadgetRepo,
+	type ReviewerRunnerRepo,
+} from "@gadget/core";
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -25,7 +32,94 @@ function categoryCatalog(repo: GadgetRepo): string {
 	}).join("\n");
 }
 
+function pickAuthoringExemplars(repo: GadgetRepo): string {
+	const picks: string[] = [];
+	const seenCategories = new Set<string>();
+	for (const c of GADGET_CATEGORIES) {
+		if (picks.length >= 3) break;
+		if (seenCategories.has(c)) continue;
+		const page = repo.list({ category: c, limit: 5 });
+		for (const summary of page.items) {
+			const g = repo.resolve(summary.id);
+			if (g === null) continue;
+			if (g.content.length > 400) continue;
+			picks.push(
+				[
+					`id: ${g.id}`,
+					`category: ${g.category}`,
+					`title: ${g.title}`,
+					`description: ${g.description}`,
+					`content (${g.content.length} chars):`,
+					g.content,
+				].join("\n"),
+			);
+			seenCategories.add(c);
+			break;
+		}
+	}
+	if (picks.length === 0) {
+		return "(no curated exemplars yet — keep gadgets short: one focused rule, ~150–250 chars.)";
+	}
+	return picks.map((p, i) => `EXEMPLAR ${i + 1}:\n${p}`).join("\n\n");
+}
+
 export function registerPrompts(server: McpServer, ctx: PromptContext): void {
+	server.registerPrompt(
+		"gadget-author",
+		{
+			title: "Author a new gadget in the house style",
+			description:
+				"Author a new single-purpose gadget that matches the curated library's shape (short, one focused rule, ~150–250 chars). Use this before calling `gadget.add-gadget` or `gadget.put-gadget`, especially when you are tempted to stuff multiple rules into one blob.",
+			argsSchema: {
+				category: completable(
+					z
+						.string()
+						.optional()
+						.describe(
+							"Optional target category: role | context | task | constraint | format | example | reasoning | tone | caveat",
+						),
+					(value): string[] => completeCategory(value ?? ""),
+				),
+				intent: z
+					.string()
+					.optional()
+					.describe("One-line description of the single rule this gadget should capture"),
+			},
+		},
+		(args) => ({
+			messages: [
+				userMessage(
+					[
+						"Author a new gadget in the house style.",
+						args.intent !== undefined && args.intent !== ""
+							? `Intent: "${args.intent}"`
+							: "Intent: (not specified — decide what single rule or persona primer this gadget captures before writing).",
+						args.category !== undefined && args.category !== ""
+							? `Target category: \`${args.category}\`.`
+							: "Pick the most specific category for the single idea. Valid categories: " +
+								GADGET_CATEGORIES.join(" | ") +
+								".",
+						"",
+						"HARD RULES:",
+						`- content: TARGET ~150 chars; ceiling ${GADGET_CONTENT_MAX}. If your draft goes past ~250 chars you are packing multiple ideas — split.`,
+						`- title: ≤${GADGET_TITLE_MAX} chars. description: ≤${GADGET_DESCRIPTION_MAX} chars. Both describe the gadget, not its content.`,
+						"- one focused idea per gadget. Do NOT pack constraints + layout + examples + reasoning into one blob.",
+						"- at most 2 markdown headings and at most 1 fenced code block — prefer plain prose or a single tight list.",
+						"- id: lowercase kebab-case, typically `<category>-<short-slug>` (e.g. `constraint-no-hedging`).",
+						"",
+						"PROCESS:",
+						"1. Review the exemplars below to calibrate tone, length, and shape.",
+						"2. Write ONE gadget. If your draft runs long, split it into multiple gadgets and file each separately.",
+						"3. Call `gadget.add-gadget` (or `gadget.put-gadget` to overwrite). The server rejects overlong or multi-purpose content.",
+						"",
+						"EXEMPLARS (live from the curated library):",
+						pickAuthoringExemplars(ctx.repo),
+					].join("\n"),
+				),
+			],
+		}),
+	);
+
 	server.registerPrompt(
 		"gadget-build-chain",
 		{

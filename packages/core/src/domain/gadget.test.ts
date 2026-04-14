@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { GadgetInputSchema, GadgetSchema, toSummary } from "./gadget.ts";
+import {
+	GADGET_CONTENT_MAX,
+	GADGET_DESCRIPTION_MAX,
+	GADGET_TITLE_MAX,
+	GadgetInputSchema,
+	GadgetSchema,
+	toSummary,
+} from "./gadget.ts";
 
 const base = {
 	id: "role-bun",
@@ -30,9 +37,45 @@ test("GadgetInputSchema defaults tags to []", () => {
 	expect(res.source).toBe("generated");
 });
 
-test("toSummary strips content", () => {
+test("toSummary returns the full gadget including content", () => {
 	const g = GadgetSchema.parse(base);
 	const s = toSummary(g);
-	expect("content" in s).toBe(false);
+	expect(s.content).toBe(base.content);
 	expect(s.id).toBe(base.id);
+});
+
+test("GadgetInputSchema rejects content over the hard cap", () => {
+	const { id, category, title, description } = base;
+	const res = GadgetInputSchema.safeParse({
+		id,
+		category,
+		title,
+		description,
+		content: "x".repeat(GADGET_CONTENT_MAX + 1),
+	});
+	expect(res.success).toBe(false);
+});
+
+test("GadgetInputSchema rejects title over the hard cap", () => {
+	const { id, category, description, content } = base;
+	const res = GadgetInputSchema.safeParse({
+		id,
+		category,
+		title: "x".repeat(GADGET_TITLE_MAX + 1),
+		description,
+		content,
+	});
+	expect(res.success).toBe(false);
+});
+
+test("GadgetInputSchema rejects description over the hard cap", () => {
+	const { id, category, title, content } = base;
+	const res = GadgetInputSchema.safeParse({
+		id,
+		category,
+		title,
+		description: "x".repeat(GADGET_DESCRIPTION_MAX + 1),
+		content,
+	});
+	expect(res.success).toBe(false);
 });
