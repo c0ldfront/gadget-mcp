@@ -57,6 +57,7 @@ interface ParsedCli {
 	readonly url?: string;
 	readonly token?: string;
 	readonly dbPath?: string;
+	readonly binary?: string;
 	readonly limit?: number;
 	readonly help?: boolean;
 }
@@ -68,7 +69,7 @@ USAGE
   gadget-mcp backup  --out PATH [--workspace=NAME]
   gadget-mcp restore --in PATH [--workspace=NAME]
   gadget-mcp audit tail [N]
-  gadget-mcp generate <${FORMATS.join("|")}> [--stdio (default) | --http --url URL] [--token T] [--workspace NAME] [--out PATH]
+  gadget-mcp generate <${FORMATS.join("|")}> [--stdio (default) | --http --url URL] [--binary PATH] [--token T] [--workspace NAME] [--out PATH]
   gadget-mcp --version
   gadget-mcp --help
 
@@ -109,6 +110,7 @@ export function parseCli(args: readonly string[]): ParsedCli {
 	let format: GenerateFormat | undefined;
 	let url: string | undefined;
 	let token: string | undefined;
+	let binary: string | undefined;
 	let limit: number | undefined;
 	let help = false;
 
@@ -159,6 +161,8 @@ export function parseCli(args: readonly string[]): ParsedCli {
 		if (u !== null) url = u;
 		const t = takeFlag(args, i, "token");
 		if (t !== null) token = t;
+		const b = takeFlag(args, i, "binary");
+		if (b !== null) binary = b;
 	}
 
 	if (help) command = "help";
@@ -174,6 +178,7 @@ export function parseCli(args: readonly string[]): ParsedCli {
 		...(format !== undefined ? { format } : {}),
 		...(url !== undefined ? { url } : {}),
 		...(token !== undefined ? { token } : {}),
+		...(binary !== undefined ? { binary } : {}),
 		...(limit !== undefined ? { limit } : {}),
 		help,
 	};
@@ -181,6 +186,25 @@ export function parseCli(args: readonly string[]): ParsedCli {
 
 async function ensureDirFor(path: string): Promise<void> {
 	await mkdir(dirname(resolve(path)), { recursive: true });
+}
+
+/**
+ * Pick the path to record in a generated client config.
+ *
+ * In a `bun build --compile` binary, `process.argv[0]` is literally
+ * "bun"; the real binary path lives in `process.execPath`. When running
+ * under `bun run` / `bun src/cli.ts`, execPath points at the Bun
+ * runtime itself (e.g. `/home/user/.bun/bin/bun`). Distinguish on the
+ * basename and fall back to the bare published name (`gadget-mcp`) in
+ * the dev case — a freshly-generated config from a compiled binary
+ * works out of the box, while dev-mode configs assume `gadget-mcp` is
+ * on PATH.
+ */
+export function detectBinary(execPath: string = process.execPath ?? ""): string {
+	if (execPath === "") return "gadget-mcp";
+	const base = execPath.split("/").pop() ?? "";
+	if (base === "bun" || base === "bun-debug" || base === "node") return "gadget-mcp";
+	return resolve(execPath);
 }
 
 async function runBackup(
@@ -355,10 +379,12 @@ async function runGenerate(cli: ParsedCli): Promise<void> {
 	// HTTP mode and then requires `--url`.
 	const mode = cli.http === true ? "http" : "stdio";
 	const workspace = cli.workspace ?? "default";
+	const binary = cli.binary ?? detectBinary();
 	const out = generateConfig({
 		format: cli.format,
 		mode,
 		workspace,
+		binary,
 		...(cli.url !== undefined ? { url: cli.url } : {}),
 		...(cli.token !== undefined ? { token: cli.token } : {}),
 		...(Bun.env.GADGET_DB !== undefined ? { dbPath: Bun.env.GADGET_DB } : {}),

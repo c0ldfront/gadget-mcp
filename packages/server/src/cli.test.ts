@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { parseCli } from "./cli.ts";
+import { describe, expect, test } from "bun:test";
+import { detectBinary, parseCli } from "./cli.ts";
 
 test("parseCli defaults command to serve", () => {
 	expect(parseCli([]).command).toBe("serve");
@@ -38,4 +38,21 @@ test("parseCli parses --workspace=foo", () => {
 test("parseCli --version and --help", () => {
 	expect(parseCli(["--version"]).command).toBe("version");
 	expect(parseCli(["--help"]).command).toBe("help");
+});
+
+describe("detectBinary", () => {
+	test("returns absolute path of a compiled binary", () => {
+		expect(detectBinary("/opt/tools/gadget-mcp-bun-linux-x64")).toBe(
+			"/opt/tools/gadget-mcp-bun-linux-x64",
+		);
+	});
+
+	test("falls back to bare name when running under bun", () => {
+		expect(detectBinary("/usr/bin/bun")).toBe("gadget-mcp");
+		expect(detectBinary("bun")).toBe("gadget-mcp");
+	});
+
+	test("falls back when argv0 is empty", () => {
+		expect(detectBinary("")).toBe("gadget-mcp");
+	});
 });
