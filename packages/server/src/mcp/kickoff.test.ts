@@ -13,6 +13,7 @@ import {
 	DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS,
 	type KickoffAnswers,
 	type KickoffRunner,
+	mcpRunner,
 	renderScopeDirective,
 	renderTopLineInstruction,
 	resolveElicitTimeoutMs,
@@ -324,6 +325,32 @@ describe("renderScopeDirective", () => {
 		expect(line).toContain("/home/user/apps/my-tool");
 		expect(line.toLowerCase()).toContain("do not consult");
 		expect(line.toLowerCase()).toContain("analogous projects");
+	});
+});
+
+describe("mcpRunner _meta timeout hint", () => {
+	test("forwards `opencode/elicitation.timeoutMs` _meta hint alongside SDK timeout option", async () => {
+		const captured: { params?: unknown; options?: unknown } = {};
+		const stubMcp = {
+			server: {
+				async elicitInput(params: unknown, options: unknown) {
+					captured.params = params;
+					captured.options = options;
+					return { action: "decline" as const };
+				},
+			},
+		} as unknown as Parameters<typeof mcpRunner>[0];
+
+		const runner = mcpRunner(stubMcp, 42_000);
+		await runner.elicit({
+			message: "hi",
+			requestedSchema: { type: "object", properties: {} },
+		});
+
+		const params = captured.params as { _meta?: Record<string, unknown> };
+		expect(params._meta).toBeDefined();
+		expect(params._meta?.["opencode/elicitation"]).toEqual({ timeoutMs: 42_000 });
+		expect((captured.options as { timeout?: number })?.timeout).toBe(42_000);
 	});
 });
 

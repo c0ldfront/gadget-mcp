@@ -306,6 +306,12 @@ export function resolveElicitTimeoutMs(raw: string | undefined): number {
 /**
  * Wrap `McpServer.server.elicitInput` so tests can inject a stub runner.
  * `timeoutMs` overrides the SDK's 60-second default per step.
+ *
+ * The same timeout is echoed to the client through the MCP-standard `_meta`
+ * channel under the `opencode/elicitation` namespace so a UI that honors the
+ * hint (e.g. opencode's TUI countdown) displays the same deadline the server
+ * will enforce. Clients that ignore `_meta` are unaffected — the key is
+ * additive and fully backwards compatible.
  */
 export function mcpRunner(mcp: McpServer, timeoutMs: number): KickoffRunner {
 	return {
@@ -322,6 +328,9 @@ export function mcpRunner(mcp: McpServer, timeoutMs: number): KickoffRunner {
 				{
 					message: args.message,
 					requestedSchema: mutableSchema,
+					_meta: {
+						"opencode/elicitation": { timeoutMs },
+					},
 				},
 				{ timeout: timeoutMs },
 			);
