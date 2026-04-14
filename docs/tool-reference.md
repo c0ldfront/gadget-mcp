@@ -14,6 +14,7 @@ at `tools/list` time. Role gates are enforced at registration time.
 | `gadget.get-gadget`     | `{ id }`                                            | `{ gadget }` — full record including `aliases[]`, `source`, `createdAt`, `updatedAt`. |
 | `gadget.list-revisions` | `{ id }`                                            | `{ revisions: Array<{ version, createdAt, title, description }> }` newest-first. |
 | `gadget.compose-prompt` | `{ gadgetIds[], separator?, useCanonicalOrder? }`   | `{ prompt, chain[] }`. Unknown ids ⇒ `gadget.composeMissingIds` with `data.missing[]`. |
+| `gadget.project-kickoff` | —                                                 | Interactive five-step MCP elicitation wizard (basics → type → runtime+quality → integrations → preview). Returns `{ prompt, chain, action, executedCommand? }`. Requires client elicitation support; honors `GADGET_KICKOFF_EXEC` for the `execute` path. See `docs/prompts.md`. |
 | `gadget.export-gadgets` | `{ includeHistory?, category? }`                    | `{ ndjson, count }`.                                   |
 | `gadget.list-runners`   | —                                                   | `{ runners[] }`.                                       |
 | `gadget.list-client-roots` | —                                                 | `{ roots[], supported }` — asks the connected client for its MCP `roots/list`. |

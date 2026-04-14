@@ -21,6 +21,7 @@ import { z } from "zod";
 import { type Role, roleAllows, TOOL_REQUIRED_ROLES } from "./auth.ts";
 import { GADGET_ERROR_CODES, gadgetMcpError, resultCodeOf, toMcpError } from "./errors.ts";
 import { assertGadgetShape } from "./gadget-shape.ts";
+import { mcpRunner, runKickoff } from "./kickoff.ts";
 
 export interface ToolContext {
 	readonly repo: GadgetRepo;
@@ -724,6 +725,77 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 						title: g.title,
 					})),
 				});
+			}),
+		);
+	}
+
+	if (isToolAllowed(role, "gadget.project-kickoff")) {
+		server.registerTool(
+			"gadget.project-kickoff",
+			{
+				title: "Interactive project kickoff wizard",
+				description:
+					"Drive a 5-step MCP elicitation flow (basics → type → runtime+quality → integrations → preview) to compose a paste-ready project kickoff prompt from the gadget library. Use this when the user says 'kick off a new project', 'help me start a new <tool>', or similar. Requires a client that supports MCP elicitation (Claude Code v2.1+). When `GADGET_KICKOFF_EXEC` is set, the `execute` action spawns that command in the target path with the composed prompt on stdin; otherwise 'execute' falls back to 'return'.",
+				outputSchema: {
+					prompt: z.string().describe("The composed kickoff paragraph, ready to paste."),
+					chain: z
+						.array(
+							z.object({
+								id: z.string(),
+								category: CategoryEnum,
+								title: z.string(),
+							}),
+						)
+						.describe("Gadget ids that contributed to the chain, in canonical order."),
+					action: z
+						.enum(["returned", "executed", "cancelled"])
+						.describe(
+							"`returned` = paragraph only; `executed` = spawned $GADGET_KICKOFF_EXEC; `cancelled` = user bailed at preview or an earlier step.",
+						),
+					executedCommand: z
+						.string()
+						.optional()
+						.describe("Command that was spawned when action=executed."),
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: true,
+				},
+			},
+			wrapHandler<Record<string, never>>(server, ctx, "gadget.project-kickoff", async () => {
+				try {
+					const result = await runKickoff(
+						mcpRunner(server),
+						ctx.repo,
+						{ GADGET_KICKOFF_EXEC: Bun.env.GADGET_KICKOFF_EXEC },
+						async (command, cwd, stdin) => {
+							const proc = Bun.spawn([command], {
+								cwd,
+								stdin: "pipe",
+								stdout: "inherit",
+								stderr: "inherit",
+							});
+							proc.stdin.write(stdin);
+							await proc.stdin.end();
+							return await proc.exited;
+						},
+					);
+					return structured({
+						prompt: result.prompt,
+						chain: result.chain,
+						action: result.action,
+						...(result.executedCommand !== undefined
+							? { executedCommand: result.executedCommand }
+							: {}),
+					});
+				} catch (err) {
+					throw gadgetMcpError({
+						code: GADGET_ERROR_CODES.InvalidGadget,
+						message: `project-kickoff failed: ${(err as Error).message}. If your client does not support MCP elicitation, the wizard cannot run here.`,
+					});
+				}
 			}),
 		);
 	}

@@ -1,6 +1,6 @@
 # Prompts
 
-`gadget-mcp` ships six MCP prompts. MCP clients surface them as
+`gadget-mcp` ships seven MCP prompts. MCP clients surface them as
 `/mcp__gadget-mcp__<name>` slash commands. Each prompt returns a single
 user-role message telling the caller exactly which `gadget.*` tools to
 chain; clients are free to execute those tool calls automatically.
@@ -18,6 +18,22 @@ protocol and are backed by the central helpers in
 > completion is rendered. When an arg can't be autocompleted, list/search
 > the value via a tool call first (`gadget.list-gadgets`,
 > `gadget.list-runners`) and paste it in.
+
+## `gadget-project-kickoff`
+
+**Args:** none.
+
+Launches the interactive project-bootstrap wizard backed by
+`gadget.project-kickoff`. Uses MCP `elicitation/create` to ask the
+user five questions (basics → project type → runtime + quality bar
+→ integrations → preview), composes a paste-ready kickoff paragraph
+from the gadget library, and either returns it or spawns
+`$GADGET_KICKOFF_EXEC` in the target path with the prompt on stdin.
+
+Requires a client that supports MCP elicitation (e.g. Claude Code
+v2.1+). On unsupported clients the underlying tool rejects with
+`gadget.invalidGadget` and the prompt body tells the LLM to fall back
+to `gadget-build-system-prompt`.
 
 ## `gadget-author`
 

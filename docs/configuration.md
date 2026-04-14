@@ -17,6 +17,7 @@ Every runtime knob is an environment variable. There is no config file.
 | `GADGET_SEED`                  | `auto`                    | `auto` seeds from `data/` at startup (falls back to seeds embedded in the binary when files are absent); `off` skips. |
 | `GADGET_PACKS`                 | —                         | CSV of optional NDJSON packs embedded in the binary to seed alongside the default catalog. Available: `tone-caveman`. Unknown names warn on stderr without failing startup. |
 | `GADGET_DISABLE_SHAPE_CHECK`   | —                         | Set to `1|true|yes|on` to disable the add/put shape validator (rejects >2 markdown headings or >1 fenced code block). |
+| `GADGET_KICKOFF_EXEC`          | —                         | Executable invoked by `gadget.project-kickoff` when the user picks `execute` on the preview step (e.g. `claude`, `opencode`). Runs in the target project path with the composed prompt on stdin. Empty ⇒ the `execute` path degrades to `return`. |
 | `GADGET_AUDIT_DAYS`            | `90`                      | Audit-log retention in days; pruned on startup.                             |
 
 ## CLI flags

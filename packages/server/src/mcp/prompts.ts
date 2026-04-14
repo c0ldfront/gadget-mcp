@@ -65,6 +65,31 @@ function pickAuthoringExemplars(repo: GadgetRepo): string {
 
 export function registerPrompts(server: McpServer, ctx: PromptContext): void {
 	server.registerPrompt(
+		"gadget-project-kickoff",
+		{
+			title: "Kick off a new project (interactive)",
+			description:
+				"Launch a five-step interactive wizard that composes a paste-ready project kickoff prompt from the gadget library. Asks for name, path, goal, project type, runtime, quality bar, and integrations via MCP elicitation, then previews the composed paragraph. Use when a user asks to start/bootstrap/scaffold a new project or tool.",
+		},
+		() => ({
+			messages: [
+				userMessage(
+					[
+						"Call `gadget.project-kickoff` now. The tool drives a five-step elicitation flow (basics → type → runtime+quality → integrations → preview). Let the user answer each step; do not pre-fill answers on their behalf.",
+						"",
+						"Once the tool returns, surface the result to the user in full:",
+						"- Show the composed `prompt` in a code block so they can copy it.",
+						"- List the `chain` of gadget ids that were selected (one per line).",
+						"- If `action` is `executed`, note which command was spawned and in which path. If `returned`, tell the user they can paste the prompt into a fresh agent session. If `cancelled`, acknowledge and stop.",
+						"",
+						"The wizard requires a client that supports MCP elicitation (e.g. Claude Code v2.1+). If the tool errors out claiming elicitation is unsupported, apologize and suggest the user invoke `gadget-build-system-prompt` instead (it doesn't need elicitation).",
+					].join("\n"),
+				),
+			],
+		}),
+	);
+
+	server.registerPrompt(
 		"gadget-author",
 		{
 			title: "Author a new gadget in the house style",

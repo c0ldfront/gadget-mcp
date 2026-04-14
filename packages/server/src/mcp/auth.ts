@@ -66,6 +66,7 @@ export const TOOL_REQUIRED_ROLES: Readonly<Record<string, Role>> = {
 	"gadget.list-runners": "reader",
 	"gadget.list-client-roots": "reader",
 	"gadget.export-gadgets": "reader",
+	"gadget.project-kickoff": "reader",
 	"gadget.add-gadget": "writer",
 	"gadget.put-gadget": "writer",
 	"gadget.rename-gadget": "writer",

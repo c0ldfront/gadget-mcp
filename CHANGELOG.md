@@ -3,6 +3,23 @@
 All notable changes to `gadget-mcp` are documented here. Format adheres to
 [Keep a Changelog][kac] and versions follow [semver][semver].
 
+## [Unreleased]
+
+### Added
+
+- **`gadget.project-kickoff` tool + `gadget-project-kickoff` slash
+  prompt.** Interactive project-bootstrap wizard that uses the MCP
+  `elicitation/create` primitive to walk the user through five steps
+  (basics → project type → runtime + quality bar → integrations →
+  preview), composes a paste-ready kickoff paragraph from the gadget
+  library, and optionally spawns a configurable executor
+  (`GADGET_KICKOFF_EXEC` env var) in the target path with the composed
+  prompt on stdin. Selection heuristic is pure (tag/keyword scoring over
+  the repo) so runs are deterministic and testable. Graceful fallback
+  on clients that don't support elicitation — returns an
+  `gadget.invalidGadget` with a suggestion to use
+  `gadget-build-system-prompt` instead. Role: `reader`.
+
 ## [0.2.0] — 2026-04-14
 
 ### Added

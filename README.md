@@ -66,6 +66,7 @@ Absent `--stdio` or `--http`, `serve` defaults to Streamable HTTP.
 | `GADGET_SEED`                  | `auto` (default) seeds from `data/` — or the payload embedded in the binary when files are absent; `off` skips | `auto`                   |
 | `GADGET_PACKS`                 | CSV of opt-in NDJSON packs embedded in the binary (e.g. `tone-caveman`) | — |
 | `GADGET_DISABLE_SHAPE_CHECK`   | Set to `1\|true\|yes\|on` to disable the heading/code-fence shape guard on add/put | — |
+| `GADGET_KICKOFF_EXEC`          | Executable spawned by `gadget.project-kickoff` when the user picks `execute` at the preview step | —        |
 | `GADGET_AUDIT_DAYS`            | Audit retention in days                                      | `90`                     |
 
 ## Tools (MCP)
@@ -108,6 +109,7 @@ All prompts surface in MCP clients as `/mcp__gadget-mcp__<name>`:
 
 | Prompt                           | Args                                         | Purpose |
 | -------------------------------- | -------------------------------------------- | ------- |
+| `gadget-project-kickoff`         | —                                            | Interactive five-step MCP-elicitation wizard that composes a paste-ready project kickoff prompt. |
 | `gadget-author`                  | `category?` *(completes)*, `intent?`         | Teach the single-purpose authoring rule with live curated exemplars before the LLM calls `add-gadget` or `put-gadget`. |
 | `gadget-build-chain`             | `task`                                       | Walk the list → get → add → compose workflow for `task`. |
 | `gadget-build-system-prompt`     | `task`, `category?` *(completes)*            | Primary entry point when a user asks for a system prompt / persona / reviewer template — ends in `gadget.compose-prompt`. |
