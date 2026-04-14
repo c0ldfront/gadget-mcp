@@ -224,6 +224,41 @@ export async function emitProgress(
 	}
 }
 
+/**
+ * Drip progress notifications at a steady cadence so the caller's
+ * `resetTimeoutOnProgress` keeps a long-running tool call alive while the
+ * handler blocks on something slow (user-facing elicitation, sampling, etc.).
+ *
+ * MCP SDK default tool-call timeout on the requester side is 60 s. Dripping
+ * every 15 s gives us ~4x headroom per beat and avoids spamming the log.
+ *
+ * The returned function stops the heartbeat and must be called on every exit
+ * path. No-op when the caller didn't supply a `progressToken` or when
+ * `sendNotification` isn't available (e.g. in unit-test stubs).
+ */
+export function startProgressHeartbeat(extra: HandlerExtra, intervalMs = 15_000): () => void {
+	const token = extra._meta?.progressToken;
+	const send = extra.sendNotification;
+	if (token === undefined || typeof send !== "function") {
+		return () => {};
+	}
+	let tick = 0;
+	const timer = setInterval(() => {
+		tick += 1;
+		send({
+			method: "notifications/progress",
+			params: { progressToken: token, progress: tick },
+		}).catch(() => {
+			// best-effort
+		});
+	}, intervalMs);
+	// Don't block process exit while a tool is pending.
+	if (typeof (timer as unknown as { unref?: () => void }).unref === "function") {
+		(timer as unknown as { unref: () => void }).unref();
+	}
+	return () => clearInterval(timer);
+}
+
 export function registerTools(server: McpServer, ctx: ToolContext): void {
 	const role = ctx.role;
 
@@ -777,53 +812,64 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 					openWorldHint: false,
 				},
 			},
-			wrapHandler<Record<string, never>>(server, ctx, "gadget.project-kickoff", async () => {
-				try {
-					const timeoutMs = resolveElicitTimeoutMs(Bun.env.GADGET_KICKOFF_TIMEOUT_MS);
-					const result = await runKickoff(
-						mcpRunner(server, timeoutMs),
-						ctx.repo,
-						async (prompt) => {
-							const res = await server.server.createMessage(
-								{
-									messages: [{ role: "user", content: { type: "text", text: prompt } }],
-									maxTokens: 2048,
-								},
-								{ timeout: timeoutMs },
-							);
-							if (res.content.type === "text") return res.content.text;
-							return "(non-text sampling response)";
-						},
-					);
-					const structuredValue: Record<string, unknown> = {
-						prompt: result.prompt,
-						chain: result.chain,
-						action: result.action,
-						...(result.dispatchHint !== undefined ? { dispatchHint: result.dispatchHint } : {}),
-						...(result.sampled !== undefined ? { sampled: result.sampled } : {}),
-					};
-					// Prefix an imperative top-line so the calling LLM reads the
-					// user's confirmed-at-the-wizard intent before the JSON payload
-					// — this suppresses the default ask-before-Task-dispatch safety
-					// habit on dispatch-now / plan-first.
-					const topLine = renderTopLineInstruction({
-						action: result.action,
-						...(result.path !== undefined ? { path: result.path } : {}),
-					});
-					return {
-						content: [
-							{ type: "text", text: topLine },
-							{ type: "text", text: JSON.stringify(structuredValue, null, 2) },
-						],
-						structuredContent: structuredValue,
-					};
-				} catch (err) {
-					throw gadgetMcpError({
-						code: GADGET_ERROR_CODES.InvalidGadget,
-						message: `project-kickoff failed: ${(err as Error).message}. If your client does not support MCP elicitation, the wizard cannot run here.`,
-					});
-				}
-			}),
+			wrapHandler<Record<string, never>>(
+				server,
+				ctx,
+				"gadget.project-kickoff",
+				async (_args, extra) => {
+					// Drip progress notifications so the caller's
+					// `resetTimeoutOnProgress` doesn't kill the tool call while the
+					// user fills the multi-step elicitation wizard.
+					const stopHeartbeat = startProgressHeartbeat(extra);
+					try {
+						const timeoutMs = resolveElicitTimeoutMs(Bun.env.GADGET_KICKOFF_TIMEOUT_MS);
+						const result = await runKickoff(
+							mcpRunner(server, timeoutMs),
+							ctx.repo,
+							async (prompt) => {
+								const res = await server.server.createMessage(
+									{
+										messages: [{ role: "user", content: { type: "text", text: prompt } }],
+										maxTokens: 2048,
+									},
+									{ timeout: timeoutMs },
+								);
+								if (res.content.type === "text") return res.content.text;
+								return "(non-text sampling response)";
+							},
+						);
+						const structuredValue: Record<string, unknown> = {
+							prompt: result.prompt,
+							chain: result.chain,
+							action: result.action,
+							...(result.dispatchHint !== undefined ? { dispatchHint: result.dispatchHint } : {}),
+							...(result.sampled !== undefined ? { sampled: result.sampled } : {}),
+						};
+						// Prefix an imperative top-line so the calling LLM reads the
+						// user's confirmed-at-the-wizard intent before the JSON payload
+						// — this suppresses the default ask-before-Task-dispatch safety
+						// habit on dispatch-now / plan-first.
+						const topLine = renderTopLineInstruction({
+							action: result.action,
+							...(result.path !== undefined ? { path: result.path } : {}),
+						});
+						return {
+							content: [
+								{ type: "text", text: topLine },
+								{ type: "text", text: JSON.stringify(structuredValue, null, 2) },
+							],
+							structuredContent: structuredValue,
+						};
+					} catch (err) {
+						throw gadgetMcpError({
+							code: GADGET_ERROR_CODES.InvalidGadget,
+							message: `project-kickoff failed: ${(err as Error).message}. If your client does not support MCP elicitation, the wizard cannot run here.`,
+						});
+					} finally {
+						stopHeartbeat();
+					}
+				},
+			),
 		);
 	}
 
