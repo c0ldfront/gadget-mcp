@@ -7,6 +7,15 @@ All notable changes to `gadget-mcp` are documented here. Format adheres to
 
 ### Changed
 
+- **`gadget.project-kickoff` composed prompts now include an explicit
+  scope directive** pinning all reads and writes to the target path
+  and forbidding consultation of sibling projects. A downstream Task
+  subagent, presented with a familiar-looking project name, was
+  otherwise liable to scan `~/Warehouse/active/apps/*` for an
+  analogous implementation and copy from it — natural LLM behavior
+  but not what the user asked for. The directive sits right after the
+  header so every subsequent rule block is framed by it. New
+  `renderScopeDirective(path)` helper with test coverage.
 - **`gadget.project-kickoff` moves the Task-dispatch confirmation into
   the wizard itself** so the calling LLM doesn't re-ask after the user
   already chose. The generic `task` preview option is split into

@@ -204,6 +204,15 @@ function renderCommitFooter(bar: QualityBar): string {
 	return "Commit discipline: conventional-commit format encouraged but not enforced. Land coherent chunks; rebase-squash messy history before merging.";
 }
 
+/**
+ * Scope directive — keeps the downstream build agent from scanning sibling
+ * projects for reference implementations. Placed right after the header so
+ * it frames every subsequent directive.
+ */
+export function renderScopeDirective(path: string): string {
+	return `Scope: every read and write target MUST be inside \`${path}\`. Do NOT consult, read, or copy from analogous projects elsewhere on the filesystem — derive every design decision from the spec in this prompt alone. If a pattern or library choice is not specified here, pick a reasonable default and note the rationale in the commit message rather than scanning sibling directories. The only reads outside \`${path}\` that are acceptable are the host language/runtime's own stdlib or package metadata (e.g. \`node_modules\`, \`~/.bun\`).`;
+}
+
 // ── prompt assembly ─────────────────────────────────────────────────────────
 
 /**
@@ -211,12 +220,13 @@ function renderCommitFooter(bar: QualityBar): string {
  * regardless of library state:
  *
  *   1. Header   — name / path / goal / type / runtime / quality bar / integrations
- *   2. Runtime  — Bun-native / Node LTS / Deno / Python uv / Rust stable / Go stdlib
- *   3. Quality  — enterprise guardrails vs. prototype velocity
- *   4. Type     — per-project-type shape directives (proxy, mcp-server, etc.)
- *   5. Integrations — per-named-integration directives, or a generic stub
- *   6. Library  — any gadget bodies selected by the scoring heuristic
- *   7. Commits  — commit / amend / --no-verify discipline
+ *   2. Scope    — read/write boundary (stay within the target path)
+ *   3. Runtime  — Bun-native / Node LTS / Deno / Python uv / Rust stable / Go stdlib
+ *   4. Quality  — enterprise guardrails vs. prototype velocity
+ *   5. Type     — per-project-type shape directives (proxy, mcp-server, etc.)
+ *   6. Integrations — per-named-integration directives, or a generic stub
+ *   7. Library  — any gadget bodies selected by the scoring heuristic
+ *   8. Commits  — commit / amend / --no-verify discipline
  */
 export function assemblePrompt(
 	repo: GadgetRepo,
@@ -233,6 +243,7 @@ export function assemblePrompt(
 	].join("\n");
 
 	const parts: string[] = [header];
+	parts.push(renderScopeDirective(answers.path));
 	parts.push(RUNTIME_DIRECTIVES[answers.runtime]);
 	parts.push(QUALITY_BAR_DIRECTIVES[answers.qualityBar]);
 	parts.push(PROJECT_TYPE_DIRECTIVES[answers.projectType]);

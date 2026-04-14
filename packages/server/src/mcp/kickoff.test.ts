@@ -13,6 +13,7 @@ import {
 	DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS,
 	type KickoffAnswers,
 	type KickoffRunner,
+	renderScopeDirective,
 	renderTopLineInstruction,
 	resolveElicitTimeoutMs,
 	runKickoff,
@@ -314,5 +315,33 @@ describe("renderTopLineInstruction", () => {
 		const line = renderTopLineInstruction({ action: "returned" });
 		expect(line).not.toContain("NOW");
 		expect(line).toContain("composed");
+	});
+});
+
+describe("renderScopeDirective", () => {
+	test("embeds the target path and a no-sibling-projects clause", () => {
+		const line = renderScopeDirective("/home/user/apps/my-tool");
+		expect(line).toContain("/home/user/apps/my-tool");
+		expect(line.toLowerCase()).toContain("do not consult");
+		expect(line.toLowerCase()).toContain("analogous projects");
+	});
+});
+
+describe("assemblePrompt scope block", () => {
+	test("the composed prompt contains the scope directive with the target path", () => {
+		const repo = seededRepo();
+		const answers: KickoffAnswers = {
+			name: "demo",
+			path: "/tmp/my-demo",
+			goal: "Demo.",
+			projectType: "cli",
+			runtime: "bun",
+			qualityBar: "prototype",
+			integrations: [],
+		};
+		const out = assemblePrompt(repo, answers, []);
+		expect(out).toContain("/tmp/my-demo");
+		expect(out.toLowerCase()).toContain("do not consult");
+		expect(out.toLowerCase()).toContain("analogous projects");
 	});
 });
