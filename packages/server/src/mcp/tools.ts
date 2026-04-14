@@ -21,7 +21,7 @@ import { z } from "zod";
 import { type Role, roleAllows, TOOL_REQUIRED_ROLES } from "./auth.ts";
 import { GADGET_ERROR_CODES, gadgetMcpError, resultCodeOf, toMcpError } from "./errors.ts";
 import { assertGadgetShape } from "./gadget-shape.ts";
-import { mcpRunner, runKickoff } from "./kickoff.ts";
+import { mcpRunner, resolveElicitTimeoutMs, runKickoff } from "./kickoff.ts";
 
 export interface ToolContext {
 	readonly repo: GadgetRepo;
@@ -766,8 +766,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 			},
 			wrapHandler<Record<string, never>>(server, ctx, "gadget.project-kickoff", async () => {
 				try {
+					const timeoutMs = resolveElicitTimeoutMs(Bun.env.GADGET_KICKOFF_TIMEOUT_MS);
 					const result = await runKickoff(
-						mcpRunner(server),
+						mcpRunner(server, timeoutMs),
 						ctx.repo,
 						{ GADGET_KICKOFF_EXEC: Bun.env.GADGET_KICKOFF_EXEC },
 						async (command, cwd, stdin) => {

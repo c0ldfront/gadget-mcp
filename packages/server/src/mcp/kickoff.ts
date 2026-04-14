@@ -160,9 +160,25 @@ export interface ElicitOutcome<T> {
 }
 
 /**
- * Wrap `McpServer.server.elicitInput` so tests can inject a stub runner.
+ * Default per-step elicitation timeout — 10 minutes. The SDK's
+ * `DEFAULT_REQUEST_TIMEOUT_MSEC` is 60 seconds, which isn't enough for a
+ * human filling a multi-step wizard. Overridable per-process via
+ * `GADGET_KICKOFF_TIMEOUT_MS`.
  */
-export function mcpRunner(mcp: McpServer): KickoffRunner {
+export const DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS = 10 * 60_000;
+
+export function resolveElicitTimeoutMs(raw: string | undefined): number {
+	if (raw === undefined || raw.trim() === "") return DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS;
+	const parsed = Number.parseInt(raw.trim(), 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS;
+	return parsed;
+}
+
+/**
+ * Wrap `McpServer.server.elicitInput` so tests can inject a stub runner.
+ * `timeoutMs` overrides the SDK's 60-second default per step.
+ */
+export function mcpRunner(mcp: McpServer, timeoutMs: number): KickoffRunner {
 	return {
 		async elicit<T>(args: {
 			message: string;
@@ -173,10 +189,13 @@ export function mcpRunner(mcp: McpServer): KickoffRunner {
 			// `readonly`. A JSON round-trip produces a structurally equivalent
 			// mutable copy the SDK accepts.
 			const mutableSchema = JSON.parse(JSON.stringify(args.requestedSchema));
-			const res = await mcp.server.elicitInput({
-				message: args.message,
-				requestedSchema: mutableSchema,
-			});
+			const res = await mcp.server.elicitInput(
+				{
+					message: args.message,
+					requestedSchema: mutableSchema,
+				},
+				{ timeout: timeoutMs },
+			);
 			return { action: res.action, content: res.content as T | undefined };
 		},
 	};

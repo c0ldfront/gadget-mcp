@@ -10,8 +10,10 @@ import {
 import embeddedGadgetsNdjson from "../../../../data/gadgets.ndjson" with { type: "text" };
 import {
 	assemblePrompt,
+	DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS,
 	type KickoffAnswers,
 	type KickoffRunner,
+	resolveElicitTimeoutMs,
 	runKickoff,
 	scoreGadget,
 	selectChain,
@@ -201,3 +203,22 @@ describe("runKickoff (elicitation orchestration)", () => {
 // full seed path so keep them reachable.
 void AuditWriter;
 void buildGadgetMetrics;
+
+describe("resolveElicitTimeoutMs", () => {
+	test("returns the default when unset or empty", () => {
+		expect(resolveElicitTimeoutMs(undefined)).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+		expect(resolveElicitTimeoutMs("")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+		expect(resolveElicitTimeoutMs("   ")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+	});
+
+	test("parses positive integers verbatim", () => {
+		expect(resolveElicitTimeoutMs("30000")).toBe(30000);
+		expect(resolveElicitTimeoutMs(" 120000 ")).toBe(120000);
+	});
+
+	test("falls back to the default on garbage / non-positive input", () => {
+		expect(resolveElicitTimeoutMs("nope")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+		expect(resolveElicitTimeoutMs("-5")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+		expect(resolveElicitTimeoutMs("0")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+	});
+});

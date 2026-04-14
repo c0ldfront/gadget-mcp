@@ -5,6 +5,13 @@ All notable changes to `gadget-mcp` are documented here. Format adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- **`gadget.project-kickoff` elicitation timeout raised to 10 minutes
+  per step** (from the SDK default of 60 seconds) so the multi-step
+  wizard doesn't time out while the user is still filling the form.
+  Configurable via `GADGET_KICKOFF_TIMEOUT_MS`.
+
 ### Added
 
 - **`gadget.project-kickoff` tool + `gadget-project-kickoff` slash
