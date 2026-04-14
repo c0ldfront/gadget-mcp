@@ -68,7 +68,7 @@ USAGE
   gadget-mcp backup  --out PATH [--workspace=NAME]
   gadget-mcp restore --in PATH [--workspace=NAME]
   gadget-mcp audit tail [N]
-  gadget-mcp generate <${FORMATS.join("|")}> [--stdio|--http] [--url URL] [--token T] [--workspace NAME] [--out PATH]
+  gadget-mcp generate <${FORMATS.join("|")}> [--stdio (default) | --http --url URL] [--token T] [--workspace NAME] [--out PATH]
   gadget-mcp --version
   gadget-mcp --help
 
@@ -351,7 +351,9 @@ async function runGenerate(cli: ParsedCli): Promise<void> {
 		process.stderr.write(`format required — one of ${FORMATS.join(", ")}\n`);
 		process.exit(2);
 	}
-	const mode = cli.stdio === true ? "stdio" : "http";
+	// generate defaults to stdio (the zero-config path). `--http` opts into
+	// HTTP mode and then requires `--url`.
+	const mode = cli.http === true ? "http" : "stdio";
 	const workspace = cli.workspace ?? "default";
 	const out = generateConfig({
 		format: cli.format,
