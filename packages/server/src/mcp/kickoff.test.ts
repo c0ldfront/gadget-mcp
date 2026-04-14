@@ -352,6 +352,31 @@ describe("mcpRunner _meta timeout hint", () => {
 		expect(params._meta?.["opencode/elicitation"]).toEqual({ timeoutMs: 42_000 });
 		expect((captured.options as { timeout?: number })?.timeout).toBe(42_000);
 	});
+
+	test("forwards fieldHints alongside timeoutMs in the scoped _meta block", async () => {
+		const captured: { params?: unknown } = {};
+		const stubMcp = {
+			server: {
+				async elicitInput(params: unknown) {
+					captured.params = params;
+					return { action: "decline" as const };
+				},
+			},
+		} as unknown as Parameters<typeof mcpRunner>[0];
+
+		const runner = mcpRunner(stubMcp, 10_000);
+		await runner.elicit({
+			message: "where?",
+			requestedSchema: { type: "object", properties: {} },
+			fieldHints: { path: { completion: "directory" } },
+		});
+
+		const params = captured.params as { _meta?: Record<string, unknown> };
+		expect(params._meta?.["opencode/elicitation"]).toEqual({
+			timeoutMs: 10_000,
+			fields: { path: { completion: "directory" } },
+		});
+	});
 });
 
 describe("assemblePrompt scope block", () => {

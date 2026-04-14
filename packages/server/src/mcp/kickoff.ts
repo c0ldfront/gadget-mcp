@@ -260,8 +260,20 @@ export function assemblePrompt(
 
 // ── elicitation orchestration ───────────────────────────────────────────────
 
+/**
+ * Per-field presentation hints passed to opencode via
+ * `_meta["opencode/elicitation"].fields`. Currently used to enable
+ * client-local filesystem autocomplete on path fields.
+ */
+export type FieldCompletion = "directory" | "path" | "file";
+export type FieldHints = Readonly<Record<string, { readonly completion: FieldCompletion }>>;
+
 export interface KickoffRunner {
-	elicit<T>(args: { message: string; requestedSchema: ElicitSchema }): Promise<ElicitOutcome<T>>;
+	elicit<T>(args: {
+		message: string;
+		requestedSchema: ElicitSchema;
+		fieldHints?: FieldHints;
+	}): Promise<ElicitOutcome<T>>;
 }
 
 export interface ElicitSchema {
@@ -318,18 +330,23 @@ export function mcpRunner(mcp: McpServer, timeoutMs: number): KickoffRunner {
 		async elicit<T>(args: {
 			message: string;
 			requestedSchema: ElicitSchema;
+			fieldHints?: FieldHints;
 		}): Promise<ElicitOutcome<T>> {
 			// The SDK's elicitInput parameter type is an overloaded union with
 			// mutable arrays and enumerations; our domain `ElicitSchema` is
 			// `readonly`. A JSON round-trip produces a structurally equivalent
 			// mutable copy the SDK accepts.
 			const mutableSchema = JSON.parse(JSON.stringify(args.requestedSchema));
+			const scopedMeta: Record<string, unknown> = { timeoutMs };
+			if (args.fieldHints !== undefined) {
+				scopedMeta.fields = args.fieldHints;
+			}
 			const res = await mcp.server.elicitInput(
 				{
 					message: args.message,
 					requestedSchema: mutableSchema,
 					_meta: {
-						"opencode/elicitation": { timeoutMs },
+						"opencode/elicitation": scopedMeta,
 					},
 				},
 				{ timeout: timeoutMs },
@@ -404,6 +421,12 @@ export async function runKickoff(
 				},
 			},
 			required: ["name", "path", "goal"],
+		},
+		// Opt into client-local directory autocomplete for the `path` field.
+		// Hint-aware clients (e.g. opencode TUI) render suggestions as the user
+		// types; clients that ignore `_meta` are unaffected.
+		fieldHints: {
+			path: { completion: "directory" },
 		},
 	});
 	if (basics.action !== "accept" || basics.content === undefined) {
