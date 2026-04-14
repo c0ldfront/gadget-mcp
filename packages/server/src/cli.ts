@@ -1,13 +1,19 @@
 #!/usr/bin/env bun
 import { mkdir, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { resolveRetentionMs, seedFromFiles } from "@gadget/core";
+import { resolveRetentionMs, seedFromContent, seedFromFiles } from "@gadget/core";
+import embeddedGadgetsNdjson from "../../../data/gadgets.ndjson" with { type: "text" };
+import embeddedRunnersJsonRaw from "../../../data/reviewer_runners.json" with { type: "text" };
 import { FORMATS, type GenerateFormat, generateConfig, isGenerateFormat } from "./cli-generate.ts";
 import { parseOriginAllowlist, parseTokens } from "./mcp/auth.ts";
 import { SERVER_NAME, SERVER_VERSION } from "./mcp/server.ts";
 import { parseAllowedHosts, startHttpServer } from "./transport/http.ts";
 import { runStdio } from "./transport/stdio.ts";
 import { parseWorkspaces, WorkspaceRegistry } from "./workspace.ts";
+
+// TS picks up resolveJsonModule for .json imports and types this as the parsed
+// array; at runtime Bun's `with { type: "text" }` hands back the raw string.
+const embeddedRunnersJson = embeddedRunnersJsonRaw as unknown as string;
 
 interface ParsedCli {
 	readonly command: "serve" | "backup" | "restore" | "generate" | "audit-tail" | "help" | "version";
@@ -196,15 +202,21 @@ async function runAuditTail(
 
 async function maybeSeed(registry: WorkspaceRegistry, workspace: string): Promise<void> {
 	if (Bun.env.GADGET_SEED === "off") return;
+	const ws = registry.get(workspace);
 	const here = new URL(".", import.meta.url).pathname;
 	const repoRoot = resolve(here, "../../..");
 	const gadgetsPath = resolve(repoRoot, "data/gadgets.ndjson");
 	const runnersPath = resolve(repoRoot, "data/reviewer_runners.json");
-	const ws = registry.get(workspace);
 	try {
-		await seedFromFiles(ws.repo, ws.runnerRepo, {
+		const fromDisk = await seedFromFiles(ws.repo, ws.runnerRepo, {
 			gadgetsNdjsonPath: gadgetsPath,
 			reviewerRunnersJsonPath: runnersPath,
+		});
+		if (fromDisk.gadgetsSeeded > 0 || fromDisk.runnersSeeded > 0) return;
+		// No on-disk data files found (typical for compiled binaries) — fall back to embedded seeds.
+		seedFromContent(ws.repo, ws.runnerRepo, {
+			gadgetsNdjson: embeddedGadgetsNdjson,
+			reviewerRunnersJson: embeddedRunnersJson,
 		});
 	} catch (err) {
 		process.stderr.write(`seed skipped: ${(err as Error).message}\n`);
