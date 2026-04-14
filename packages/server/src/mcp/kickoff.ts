@@ -36,14 +36,38 @@ export interface ChainItem {
 	readonly title: string;
 }
 
-export type KickoffAction = "returned" | "task-dispatch" | "sampled" | "cancelled";
+export type KickoffAction = "returned" | "dispatch-now" | "plan-first" | "sampled" | "cancelled";
 
 export interface KickoffResult {
 	readonly prompt: string;
 	readonly chain: readonly ChainItem[];
 	readonly action: KickoffAction;
+	readonly path?: string;
 	readonly dispatchHint?: string;
 	readonly sampled?: { readonly text: string };
+}
+
+/**
+ * Imperative top-line instruction the calling LLM sees as its first line of
+ * tool-result content. Phrased to suppress Claude Code's default
+ * "ask-before-Task-dispatch" safety habit when the user has already
+ * confirmed the action at the wizard's preview step.
+ */
+export function renderTopLineInstruction(
+	result: Pick<KickoffResult, "action"> & { path?: string },
+): string {
+	switch (result.action) {
+		case "dispatch-now":
+			return `USER HAS APPROVED TASK DISPATCH at the wizard's preview step. Call your Task tool NOW with \`cwd\` set to \`${result.path ?? "<target path>"}\` and the composed \`prompt\` below as the subagent's task description. DO NOT re-confirm with the user — they already confirmed.`;
+		case "plan-first":
+			return `USER HAS APPROVED A PLAN-FIRST FLOW at the wizard's preview step. Dispatch a planning Task subagent NOW with \`cwd\` set to \`${result.path ?? "<target path>"}\` and the composed \`prompt\` below as the task — with an explicit additional instruction: "Produce an implementation blueprint only. Do not write any code, create files, or run tools that modify the filesystem." DO NOT re-confirm — user already chose plan-first.`;
+		case "sampled":
+			return "The host ran one LLM turn with the composed prompt on the server's behalf. The reply is in `sampled.text`. Surface it to the user.";
+		case "cancelled":
+			return "The user cancelled at the wizard. Stop here — do not take further action.";
+		default:
+			return "The wizard composed a kickoff prompt (below in `prompt`). Show it to the user and ask what they want to do with it.";
+	}
 }
 
 // ── selection heuristic ─────────────────────────────────────────────────────
@@ -315,7 +339,7 @@ interface IntegrationsPayload {
 }
 
 interface PreviewPayload {
-	action: "return" | "task" | "sample" | "cancel";
+	action: "return" | "dispatch-now" | "plan-first" | "sample" | "cancel";
 }
 
 /**
@@ -459,12 +483,13 @@ export async function runKickoff(
 					type: "string",
 					title: "Dispatch mode",
 					description:
-						"`return` hands the paragraph back; `task` adds a dispatchHint asking the calling LLM to spawn a Task subagent in the target path; `sample` asks the host to run one LLM turn with the prompt and surfaces the response; `cancel` aborts.",
-					enum: ["return", "task", "sample", "cancel"],
+						"Pick one: `return` hands the paragraph back without dispatching; `dispatch-now` tells the calling LLM to spawn a Task subagent IMMEDIATELY in the target path (you have already confirmed — it will not re-ask); `plan-first` dispatches a planning Task that produces a blueprint only, no code; `sample` asks the host to run one LLM turn with the prompt and surfaces the response; `cancel` aborts.",
+					enum: ["return", "dispatch-now", "plan-first", "sample", "cancel"],
 					enumNames: [
-						"return — plain tool result",
-						"task  — tool result + Task dispatch hint",
-						"sample — server asks host to run one LLM turn",
+						"return — plain tool result (I'll decide later)",
+						"dispatch-now — spawn a Task subagent NOW in the target path",
+						"plan-first — dispatch a planning Task (blueprint only, no code)",
+						"sample — server asks host model to run one LLM turn",
 						"cancel",
 					],
 					default: "return",
@@ -474,27 +499,33 @@ export async function runKickoff(
 		},
 	});
 	if (preview.action !== "accept" || preview.content === undefined) {
-		return { prompt, chain, action: "cancelled" };
+		return { prompt, chain, path: answers.path, action: "cancelled" };
 	}
+	const base = { prompt, chain, path: answers.path } as const;
 	switch (preview.content.action) {
 		case "cancel":
-			return { prompt, chain, action: "cancelled" };
-		case "task":
+			return { ...base, action: "cancelled" };
+		case "dispatch-now":
 			return {
-				prompt,
-				chain,
-				action: "task-dispatch",
-				dispatchHint: `Dispatch this prompt to a Task subagent with cwd set to \`${answers.path}\`. Do NOT continue the build inline in the current conversation — use your Task tool so the subagent gets its own context window.`,
+				...base,
+				action: "dispatch-now",
+				dispatchHint: `User has approved. Call your Task tool NOW with cwd=\`${answers.path}\` and the composed prompt as the subagent's task. Do not re-confirm.`,
+			};
+		case "plan-first":
+			return {
+				...base,
+				action: "plan-first",
+				dispatchHint: `User has approved a plan-first flow. Dispatch a planning Task subagent NOW with cwd=\`${answers.path}\`, the composed prompt, and an added constraint: "Produce an implementation blueprint only. Do not write code, create files, or run tools that modify the filesystem." Do not re-confirm.`,
 			};
 		case "sample": {
 			try {
 				const sampledText = await sample(prompt);
-				return { prompt, chain, action: "sampled", sampled: { text: sampledText } };
+				return { ...base, action: "sampled", sampled: { text: sampledText } };
 			} catch {
-				return { prompt, chain, action: "returned" };
+				return { ...base, action: "returned" };
 			}
 		}
 		default:
-			return { prompt, chain, action: "returned" };
+			return { ...base, action: "returned" };
 	}
 }

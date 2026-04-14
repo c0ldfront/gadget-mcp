@@ -13,6 +13,7 @@ import {
 	DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS,
 	type KickoffAnswers,
 	type KickoffRunner,
+	renderTopLineInstruction,
 	resolveElicitTimeoutMs,
 	runKickoff,
 	scoreGadget,
@@ -197,19 +198,36 @@ describe("runKickoff (elicitation orchestration)", () => {
 		expect(res.prompt.length).toBeGreaterThan(0);
 	});
 
-	test("returns `task-dispatch` with a dispatch hint when the user picks task mode", async () => {
+	test("returns `dispatch-now` with a no-reconfirm hint when the user picks dispatch-now", async () => {
 		const repo = seededRepo();
 		const { runner } = stubRunner([
 			{ action: "accept", content: { name: "demo", path: "/tmp/demo", goal: "Demo." } },
 			{ action: "accept", content: { projectType: "cli" } },
 			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
 			{ action: "accept", content: { integrations: "" } },
-			{ action: "accept", content: { action: "task" } },
+			{ action: "accept", content: { action: "dispatch-now" } },
 		]);
 		const res = await runKickoff(runner, repo, async () => "");
-		expect(res.action).toBe("task-dispatch");
+		expect(res.action).toBe("dispatch-now");
 		expect(res.dispatchHint ?? "").toContain("/tmp/demo");
 		expect(res.dispatchHint ?? "").toContain("Task");
+		expect((res.dispatchHint ?? "").toLowerCase()).toContain("not re-confirm");
+		expect(res.path).toBe("/tmp/demo");
+	});
+
+	test("returns `plan-first` with a plan-only instruction when the user picks plan-first", async () => {
+		const repo = seededRepo();
+		const { runner } = stubRunner([
+			{ action: "accept", content: { name: "demo", path: "/tmp/demo", goal: "Demo." } },
+			{ action: "accept", content: { projectType: "cli" } },
+			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
+			{ action: "accept", content: { integrations: "" } },
+			{ action: "accept", content: { action: "plan-first" } },
+		]);
+		const res = await runKickoff(runner, repo, async () => "");
+		expect(res.action).toBe("plan-first");
+		expect(res.dispatchHint ?? "").toContain("blueprint only");
+		expect((res.dispatchHint ?? "").toLowerCase()).toContain("not re-confirm");
 	});
 
 	test("returns `sampled` with the host's response when the user picks sample mode", async () => {
@@ -269,5 +287,32 @@ describe("resolveElicitTimeoutMs", () => {
 		expect(resolveElicitTimeoutMs("nope")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
 		expect(resolveElicitTimeoutMs("-5")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
 		expect(resolveElicitTimeoutMs("0")).toBe(DEFAULT_KICKOFF_ELICIT_TIMEOUT_MS);
+	});
+});
+
+describe("renderTopLineInstruction", () => {
+	test("dispatch-now includes the cwd and a no-reconfirm directive", () => {
+		const line = renderTopLineInstruction({ action: "dispatch-now", path: "/tmp/proj" });
+		expect(line).toContain("/tmp/proj");
+		expect(line).toContain("NOW");
+		expect(line.toLowerCase()).toContain("not re-confirm");
+	});
+
+	test("plan-first instructs a blueprint-only planning Task", () => {
+		const line = renderTopLineInstruction({ action: "plan-first", path: "/tmp/proj" });
+		expect(line).toContain("blueprint");
+		expect(line.toLowerCase()).toContain("not re-confirm");
+	});
+
+	test("cancelled yields a stop-here directive", () => {
+		const line = renderTopLineInstruction({ action: "cancelled" });
+		expect(line.toLowerCase()).toContain("cancel");
+		expect(line.toLowerCase()).toContain("stop");
+	});
+
+	test("default (returned) describes the composed paragraph without a dispatch directive", () => {
+		const line = renderTopLineInstruction({ action: "returned" });
+		expect(line).not.toContain("NOW");
+		expect(line).toContain("composed");
 	});
 });

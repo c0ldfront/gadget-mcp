@@ -7,6 +7,17 @@ All notable changes to `gadget-mcp` are documented here. Format adheres to
 
 ### Changed
 
+- **`gadget.project-kickoff` moves the Task-dispatch confirmation into
+  the wizard itself** so the calling LLM doesn't re-ask after the user
+  already chose. The generic `task` preview option is split into
+  `dispatch-now` (spawn a build subagent immediately) and `plan-first`
+  (spawn a planning subagent that produces a blueprint only, no code).
+  Both paths return a new imperative top-line `content` block ahead of
+  the JSON payload so the host LLM reads the user-approved intent
+  before any safety-habit ask-again logic fires. The `dispatchHint`
+  field is also rewritten to explicitly say "user has approved — do not
+  re-confirm." New public `renderTopLineInstruction` helper factors
+  this out with test coverage for every `KickoffAction`.
 - **`gadget.project-kickoff` preview step replaces `execute` with three
   MCP-native dispatch modes.** Previously picking `execute` tried to
   spawn `$GADGET_KICKOFF_EXEC` as a subprocess — brittle (bare `claude`

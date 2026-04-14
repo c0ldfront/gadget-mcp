@@ -21,7 +21,12 @@ import { z } from "zod";
 import { type Role, roleAllows, TOOL_REQUIRED_ROLES } from "./auth.ts";
 import { GADGET_ERROR_CODES, gadgetMcpError, resultCodeOf, toMcpError } from "./errors.ts";
 import { assertGadgetShape } from "./gadget-shape.ts";
-import { mcpRunner, resolveElicitTimeoutMs, runKickoff } from "./kickoff.ts";
+import {
+	mcpRunner,
+	renderTopLineInstruction,
+	resolveElicitTimeoutMs,
+	runKickoff,
+} from "./kickoff.ts";
 
 export interface ToolContext {
 	readonly repo: GadgetRepo;
@@ -748,15 +753,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 						)
 						.describe("Gadget ids that contributed to the chain, in canonical order."),
 					action: z
-						.enum(["returned", "task-dispatch", "sampled", "cancelled"])
+						.enum(["returned", "dispatch-now", "plan-first", "sampled", "cancelled"])
 						.describe(
-							"`returned` = plain tool result (LLM reads + decides); `task-dispatch` = tool result + dispatchHint asking the calling LLM to spawn a Task subagent in the target path; `sampled` = server called sampling/createMessage and surfaces the host-model response; `cancelled` = user bailed.",
+							"`returned` = plain tool result (LLM reads + decides); `dispatch-now` = user approved Task dispatch at the wizard — LLM must call its Task tool now without re-confirming; `plan-first` = user approved a planning Task (blueprint only); `sampled` = server called sampling/createMessage and surfaces the host-model response; `cancelled` = user bailed.",
 						),
 					dispatchHint: z
 						.string()
 						.optional()
 						.describe(
-							"Present when action=task-dispatch. Tells the calling LLM to spawn a Task subagent with this prompt in the target project path instead of running inline.",
+							"Present when action=dispatch-now or plan-first. Imperative instruction for the calling LLM — the user has already confirmed at the wizard's preview step, so the LLM should act without re-asking.",
 						),
 					sampled: z
 						.object({ text: z.string() })
@@ -790,13 +795,28 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 							return "(non-text sampling response)";
 						},
 					);
-					return structured({
+					const structuredValue: Record<string, unknown> = {
 						prompt: result.prompt,
 						chain: result.chain,
 						action: result.action,
 						...(result.dispatchHint !== undefined ? { dispatchHint: result.dispatchHint } : {}),
 						...(result.sampled !== undefined ? { sampled: result.sampled } : {}),
+					};
+					// Prefix an imperative top-line so the calling LLM reads the
+					// user's confirmed-at-the-wizard intent before the JSON payload
+					// — this suppresses the default ask-before-Task-dispatch safety
+					// habit on dispatch-now / plan-first.
+					const topLine = renderTopLineInstruction({
+						action: result.action,
+						...(result.path !== undefined ? { path: result.path } : {}),
 					});
+					return {
+						content: [
+							{ type: "text", text: topLine },
+							{ type: "text", text: JSON.stringify(structuredValue, null, 2) },
+						],
+						structuredContent: structuredValue,
+					};
 				} catch (err) {
 					throw gadgetMcpError({
 						code: GADGET_ERROR_CODES.InvalidGadget,
