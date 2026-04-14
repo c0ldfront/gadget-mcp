@@ -135,8 +135,16 @@ function wrapHandler<A extends object>(
 	return (async (rawArgs: unknown, rawExtra: unknown): Promise<CallToolResult> => {
 		const started = performance.now();
 		let code = "ok";
-		const args = rawArgs as A;
-		const extra = (rawExtra as HandlerExtra) ?? {};
+		// The SDK's `BaseToolCallback` uses a (args, extra) signature for tools
+		// that declare an input schema, but collapses to (extra) for tools
+		// without one — project-kickoff hits that branch. Detect and shift.
+		const noInputSchema =
+			rawExtra === undefined &&
+			rawArgs !== null &&
+			typeof rawArgs === "object" &&
+			"signal" in (rawArgs as Record<string, unknown>);
+		const args = (noInputSchema ? {} : rawArgs) as A;
+		const extra = ((noInputSchema ? rawArgs : rawExtra) as HandlerExtra) ?? {};
 		try {
 			return await handler(args, extra);
 		} catch (err) {
