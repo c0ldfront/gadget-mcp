@@ -97,12 +97,99 @@ export function selectChain(repo: GadgetRepo, answers: KickoffAnswers): readonly
 	return chain;
 }
 
+// ── built-in directive blocks ───────────────────────────────────────────────
+
+/**
+ * Per-answer directive blocks baked into the tool so the output is always
+ * useful — even when the gadget library has no matches. Library-selected
+ * gadgets stack on top of this baseline as extra flavor.
+ */
+
+const RUNTIME_DIRECTIVES: Record<Runtime, string> = {
+	bun: "Runtime: Bun-native only. Use `Bun.file`, `Bun.write`, `Bun.$` (array form), `Bun.spawn` (shell:false), native `fetch`, `Bun.CryptoHasher`, `bun:sqlite`, `bun:test`. Forbidden in source: express, better-sqlite3, execa, ws, ioredis, pg, postgres.js, axios, node-fetch, dotenv, ts-node, jest, vitest. `node:fs` read/writeFile is forbidden; `node:path` and `node:os` (tmpdir only in tests) are allowed. Zero deprecated APIs.",
+	node: "Runtime: Node.js on the active LTS. Prefer the standard library (`node:fs/promises`, `node:http`, `node:crypto`) over third-party shims. Promises only — no legacy callback APIs. TypeScript via tsc with strict mode; Vitest or `node:test` for tests. Zero deprecated APIs.",
+	deno: "Runtime: Deno. Use the standard library under `@std/*` and JSR imports. `deno test` for tests, `deno fmt` + `deno lint`. Leverage top-level permissions (`--allow-net`, `--allow-read`) — do not request broader perms than needed.",
+	python:
+		"Runtime: Python 3.12+. Use `uv` for dependency and venv management. Strict typing with `ty`/`mypy`; formatter+linter is `ruff`; tests with `pytest`. Async-first for I/O; stdlib `pathlib` over `os.path`.",
+	rust: "Runtime: Rust stable. Cargo workspaces; `clippy -- -D warnings` and `cargo fmt --check` gate every commit. Unit tests inline (`#[cfg(test)]`), integration tests under `tests/`. No `unwrap()` in production paths — propagate errors via `?` into a typed `thiserror` enum.",
+	go: "Runtime: Go on the current stable. `gofmt` + `goimports` + `staticcheck` all clean. `go test ./...` green. Errors wrapped with `%w` for unwrap support. Contexts threaded through every I/O call site.",
+};
+
+const QUALITY_BAR_DIRECTIVES: Record<QualityBar, string> = {
+	enterprise:
+		"Quality bar: enterprise. Strict typechecking with explicit public API return types and zero `any`/untyped escapes. Sibling `*.test.ts` (or equivalent) for every function-level source file. A single `*_ERROR_CODES` registry funneled through one domain-error factory — no bare `throw new Error(...)` in library code. Observability is first-class: `/healthz`, `/readyz`, `/metrics` (Prometheus text v0.0.4), append-only audit log, structured JSON logs. Release ships per-triple compiled binaries with `SHA256SUMS.txt` and a CycloneDX 1.5 SBOM. Commit per feature only when lint + typecheck + tests are all green.",
+	prototype:
+		"Quality bar: prototype. Keep it tight but pragmatic — working code over exhaustive coverage. A happy-path test per module is enough; defer property tests and exhaustive edge cases until the shape settles. Skip heavy linter configs until the domain stabilizes. Ship, observe, then harden.",
+};
+
+const PROJECT_TYPE_DIRECTIVES: Record<ProjectType, string> = {
+	cli: "Shape: single-binary CLI. Ship `--help`, `--version`, and a config stanza in `package.json` (or equivalent) that the build script reads. Parse argv by hand — no heavy arg library. Exit codes: 0 OK, 1 domain error, 2 CLI usage error. Respect `NO_COLOR` and `CI` env vars.",
+	"web-service":
+		"Shape: HTTP service. Expose `/healthz` (liveness, always 200), `/readyz` (probes dependencies), `/metrics` (Prometheus text v0.0.4). Graceful shutdown on SIGINT/SIGTERM — drain in-flight requests, close pools, then exit. Request body size limit, origin allowlist, bearer-token RBAC. Every request gets a correlation id.",
+	"mcp-server":
+		"Shape: MCP server. Use `@modelcontextprotocol/sdk`'s `McpServer` with `registerTool` (zod `inputSchema` + `outputSchema` + per-arg `.describe()` + annotations: `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`), `registerResource` (URI templates with completion), `registerPrompt` (argsSchema with `completable`). Handle `notifications/message` + `notifications/progress` and `AbortSignal` cancellation. Ship both stdio and Streamable HTTP transports. Role-gate tools at registration time so unauthorized tools never appear in `tools/list`.",
+	library:
+		"Shape: library / npm package. Public API surface is the export barrel only; internal modules stay unexported. Ship types (`.d.ts`) alongside runtime. Never call `process.exit`. Zero side effects at import time. Publish-ready with `files` whitelist and an `exports` map.",
+	proxy:
+		"Shape: proxy. Stream request and response bodies — do not buffer unless semantically required. Propagate client cancellation via `AbortSignal` to the upstream request so abandoned calls free upstream resources. Map upstream failure modes: 5xx → retry with jittered backoff (bounded attempts), 429 → pass through `Retry-After`, timeouts → surface as 504. Configurable origin/host allowlists and bearer-token RBAC. Schema-validate every request at the boundary.",
+	daemon:
+		"Shape: long-running daemon. systemd unit / launchd plist in the release artifacts. Log rotation aware — don't hold file handles across rotations. Signal handling: SIGHUP reloads config, SIGTERM drains and exits 0, SIGUSR1 dumps diagnostics. State lives under `XDG_STATE_HOME` (Linux) or `~/Library/Application Support` (macOS).",
+	"desktop-app":
+		"Shape: desktop app. OS-native packaging (.dmg, .msi, .AppImage). Code-signed on macOS and Windows. Auto-update channel with signed manifests. No privileged install steps without explicit user consent.",
+};
+
+const INTEGRATION_DIRECTIVES: Record<string, string> = {
+	mcp: "MCP: use the official `@modelcontextprotocol/sdk` client or server. `registerTool` with both `inputSchema` and `outputSchema`, per-arg `.describe()`, and standardized annotations. Never advertise tools the caller's role can't invoke.",
+	sqlite:
+		"SQLite: `bun:sqlite` with WAL journal and `PRAGMA foreign_keys=ON`. Parameterize every value via `$name` bindings — no string interpolation of untrusted input. Migrations are hand-rolled and idempotent; FTS5 virtual tables stay consistent via insert/delete/update triggers.",
+	openai:
+		"OpenAI-compat: implement `POST /v1/chat/completions` and `/v1/models` faithfully — `messages[]` (system, user, assistant, tool, multimodal `content` parts), `tools[]` + `tool_choice`, `stream:true` with SSE framing (`data: {...}\\n\\n`, terminal `data: [DONE]\\n\\n`), `response_format`, `temperature`/`top_p`/`stop`/`max_tokens`/`seed`/`user`, bearer `Authorization` passthrough.",
+	"openai-compat":
+		"OpenAI-compat: implement `POST /v1/chat/completions` and `/v1/models` faithfully — `messages[]` (system, user, assistant, tool, multimodal `content` parts), `tools[]` + `tool_choice`, `stream:true` with SSE framing (`data: {...}\\n\\n`, terminal `data: [DONE]\\n\\n`), `response_format`, `temperature`/`top_p`/`stop`/`max_tokens`/`seed`/`user`, bearer `Authorization` passthrough.",
+	sse: "SSE: strict framing (`data: {...}\\n\\n`). Flush per frame. Handle partial frames at the transport boundary. Send a heartbeat comment (`:ping\\n\\n`) every 15 s on idle connections so proxies don't drop the stream.",
+	github:
+		"GitHub: prefer the `gh` CLI over raw REST where it covers the use case. Release tags `v*` trigger the release workflow. Use `actions/attest-build-provenance` for OIDC-signed provenance on artifacts.",
+	prometheus:
+		"Prometheus: emit hand-rolled text v0.0.4 from `/metrics`. Canonical series: `*_calls_total{…,result=}` (counter), `*_duration_seconds{…}` (histogram with sensible buckets), `*_<resource>_total` (gauge). No client library dependency.",
+};
+
+function renderIntegrationBlock(integrations: readonly string[]): string | null {
+	if (integrations.length === 0) return null;
+	const blocks: string[] = [];
+	for (const raw of integrations) {
+		const key = raw.toLowerCase().trim();
+		const directive = INTEGRATION_DIRECTIVES[key];
+		if (directive !== undefined) {
+			blocks.push(directive);
+		} else {
+			blocks.push(
+				`${raw}: external integration — research the current API surface before touching it.`,
+			);
+		}
+	}
+	return blocks.join("\n\n");
+}
+
+function renderCommitFooter(bar: QualityBar): string {
+	if (bar === "enterprise") {
+		return "Commit discipline: conventional commits (`feat(scope):`, `fix(scope):`, `chore:`, `docs:`), one feature per commit, all gates green before commit. Never `--amend` published history; never `--no-verify`.";
+	}
+	return "Commit discipline: conventional-commit format encouraged but not enforced. Land coherent chunks; rebase-squash messy history before merging.";
+}
+
 // ── prompt assembly ─────────────────────────────────────────────────────────
 
 /**
- * Render a paragraph-style kickoff prompt from the interview answers and the
- * gadget chain. The user's `goal` stays verbatim; the chain's content is
- * fetched from the repo and appended slot-by-slot.
+ * Render a paragraph-style kickoff prompt. Always produces a useful body
+ * regardless of library state:
+ *
+ *   1. Header   — name / path / goal / type / runtime / quality bar / integrations
+ *   2. Runtime  — Bun-native / Node LTS / Deno / Python uv / Rust stable / Go stdlib
+ *   3. Quality  — enterprise guardrails vs. prototype velocity
+ *   4. Type     — per-project-type shape directives (proxy, mcp-server, etc.)
+ *   5. Integrations — per-named-integration directives, or a generic stub
+ *   6. Library  — any gadget bodies selected by the scoring heuristic
+ *   7. Commits  — commit / amend / --no-verify discipline
  */
 export function assemblePrompt(
 	repo: GadgetRepo,
@@ -117,16 +204,20 @@ export function assemblePrompt(
 			? `Integrations: ${answers.integrations.join(", ")}.`
 			: "Integrations: (none specified).",
 	].join("\n");
-	const bodies: string[] = [];
+
+	const parts: string[] = [header];
+	parts.push(RUNTIME_DIRECTIVES[answers.runtime]);
+	parts.push(QUALITY_BAR_DIRECTIVES[answers.qualityBar]);
+	parts.push(PROJECT_TYPE_DIRECTIVES[answers.projectType]);
+	const integrationBlock = renderIntegrationBlock(answers.integrations);
+	if (integrationBlock !== null) parts.push(integrationBlock);
 	for (const item of chain) {
 		const g = repo.resolve(item.id);
 		if (g === null) continue;
-		bodies.push(g.content);
+		parts.push(g.content);
 	}
-	if (bodies.length === 0) {
-		return `${header}\n\n(No matching gadgets were found in the library for these answers — write your own prompt body here.)`;
-	}
-	return `${header}\n\n${bodies.join("\n\n")}`;
+	parts.push(renderCommitFooter(answers.qualityBar));
+	return parts.join("\n\n");
 }
 
 // ── elicitation orchestration ───────────────────────────────────────────────

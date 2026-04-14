@@ -101,12 +101,39 @@ describe("assemblePrompt", () => {
 		expect(prompt).toContain("MCP, SQLite");
 	});
 
-	test("emits a placeholder note when no gadgets match", () => {
+	test("always emits a useful body even with no library matches", () => {
 		const repo = seededRepo();
-		const answers: KickoffAnswers = { ...baseAnswers, runtime: "rust", integrations: [] };
+		const answers: KickoffAnswers = {
+			...baseAnswers,
+			runtime: "rust",
+			projectType: "cli",
+			qualityBar: "prototype",
+			integrations: [],
+		};
 		// Force an empty chain by passing []
 		const prompt = assemblePrompt(repo, answers, []);
-		expect(prompt).toContain("No matching gadgets");
+		// No placeholder text about missing gadgets
+		expect(prompt).not.toContain("No matching gadgets");
+		// Runtime, quality, and type directives all present
+		expect(prompt.toLowerCase()).toContain("rust");
+		expect(prompt.toLowerCase()).toContain("prototype");
+		expect(prompt.toLowerCase()).toContain("cli");
+		// Commit footer lands
+		expect(prompt.toLowerCase()).toContain("commit");
+	});
+
+	test("known integrations get dedicated directive blocks", () => {
+		const repo = seededRepo();
+		const prompt = assemblePrompt(repo, { ...baseAnswers, integrations: ["mcp", "sqlite"] }, []);
+		expect(prompt).toContain("MCP:");
+		expect(prompt).toContain("SQLite:");
+	});
+
+	test("unknown integrations fall back to a generic stub", () => {
+		const repo = seededRepo();
+		const prompt = assemblePrompt(repo, { ...baseAnswers, integrations: ["FooBar"] }, []);
+		expect(prompt).toContain("FooBar");
+		expect(prompt).toContain("external integration");
 	});
 });
 

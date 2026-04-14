@@ -7,6 +7,19 @@ All notable changes to `gadget-mcp` are documented here. Format adheres to
 
 ### Changed
 
+- **`gadget.project-kickoff` now emits a full actionable baseline prompt
+  regardless of library state.** The tool previously relied entirely on
+  tag/keyword matches in the gadget library; when nothing matched (the
+  common case for domains the seed library doesn't cover — e.g. a Bun
+  OpenAI-compat proxy), it emitted only a header plus a
+  "no matching gadgets" placeholder. Now the tool has built-in
+  per-answer directive blocks for runtime (`bun | node | deno | python
+  | rust | go`), quality bar (`enterprise | prototype`), project type
+  (`cli | web-service | mcp-server | library | proxy | daemon |
+  desktop-app`), and common integrations (`mcp`, `sqlite`, `openai`,
+  `openai-compat`, `sse`, `github`, `prometheus`). Library-matched
+  gadgets stack on top as additional flavor. Result: kickoff output is
+  ~2 KB of concrete guidance even with a barebones library.
 - **`gadget.project-kickoff` elicitation timeout raised to 10 minutes
   per step** (from the SDK default of 60 seconds) so the multi-step
   wizard doesn't time out while the user is still filling the form.
