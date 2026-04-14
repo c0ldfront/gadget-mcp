@@ -1,6 +1,6 @@
 # Prompts
 
-`gadget-mcp` ships five MCP prompts. MCP clients surface them as
+`gadget-mcp` ships six MCP prompts. MCP clients surface them as
 `/mcp__gadget-mcp__<name>` slash commands. Each prompt returns a single
 user-role message telling the caller exactly which `gadget.*` tools to
 chain; clients are free to execute those tool calls automatically.
@@ -8,6 +8,35 @@ chain; clients are free to execute those tool calls automatically.
 Arguments tagged *(completes)* use the MCP `completion/complete`
 protocol and are backed by the central helpers in
 `packages/server/src/mcp/completers.ts`.
+
+> **Client-side autocomplete limitation.** The server advertises
+> `completions: {}` and responds correctly to `completion/complete` for
+> every prompt argument marked *(completes)* (verified against the SDK
+> client in `packages/server/src/mcp/server.test.ts`). Some MCP clients —
+> notably Claude Code as of v2.1.107 — do not yet surface prompt-argument
+> autocomplete in their slash-command UI; only resource-template argument
+> completion is rendered. When an arg can't be autocompleted, list/search
+> the value via a tool call first (`gadget.list-gadgets`,
+> `gadget.list-runners`) and paste it in.
+
+## `gadget-author`
+
+**Args:**
+- `category` (string, optional, **completes** over the nine canonical
+  categories) — target slot for the new gadget.
+- `intent` (string, optional) — one-line description of the single rule
+  the gadget should capture.
+
+Teaches the house single-purpose rule before any `add-gadget` /
+`put-gadget` call. Pulls **three live curated exemplars** from the
+connected workspace's repo so the LLM has real in-domain shape to match,
+quotes the hard caps (`title ≤ 80`, `description ≤ 200`, `content ≤ 500`)
+and the shape guard (≤ 2 headings, ≤ 1 code fence), and walks through a
+three-step process: calibrate to exemplars → write one gadget → call
+`gadget.add-gadget` (or `gadget.put-gadget` to overwrite).
+
+Use this whenever the LLM is tempted to stuff multiple rules into one
+body — the prompt body forces the split-first discipline.
 
 ## `gadget-build-chain`
 

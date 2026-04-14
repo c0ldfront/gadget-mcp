@@ -28,8 +28,10 @@ packages/
   core/      # domain + bun:sqlite storage + services (gadgets, audit, metrics, runners, ndjson)
   server/    # MCP SDK integration, auth, transports, CLI
 data/
-  gadgets.ndjson           # seed gadget catalog
-  reviewer_runners.json    # seed reviewer runners
+  gadgets.ndjson           # seed gadget catalog (22 rpp-ts-style domain gadgets, embedded in the compiled binary)
+  gadgets.ndjson.bak       # prior meta-gadget seed set, preserved for reference
+  reviewer_runners.json    # seed reviewer runners (also embedded)
+  tone-caveman.ndjson      # optional pack: 3 compression-tone gadgets; enable with GADGET_PACKS=tone-caveman
 artifacts/   # runtime output (DB, backups, custom gadgets)
 tests/       # end-to-end spec spawning the CLI over stdio + HTTP
 ```
@@ -61,7 +63,9 @@ Absent `--stdio` or `--http`, `serve` defaults to Streamable HTTP.
 | `GADGET_ORIGIN_ALLOWLIST`      | CSV of allowed `Origin` header values                        | — (no origin check)      |
 | `GADGET_HTTP_ALLOWED_HOSTS`    | CSV of allowed `Host` header values (DNS-rebind mitigation)  | — (no host check)        |
 | `GADGET_HTTP_MAX_BODY_BYTES`   | Cap on `Content-Length` for `/mcp` POSTs                     | `10485760` (10 MB)       |
-| `GADGET_SEED`                  | `auto` (default) seeds from `data/` at startup; `off` skips  | `auto`                   |
+| `GADGET_SEED`                  | `auto` (default) seeds from `data/` — or the payload embedded in the binary when files are absent; `off` skips | `auto`                   |
+| `GADGET_PACKS`                 | CSV of opt-in NDJSON packs embedded in the binary (e.g. `tone-caveman`) | — |
+| `GADGET_DISABLE_SHAPE_CHECK`   | Set to `1\|true\|yes\|on` to disable the heading/code-fence shape guard on add/put | — |
 | `GADGET_AUDIT_DAYS`            | Audit retention in days                                      | `90`                     |
 
 ## Tools (MCP)
@@ -104,13 +108,17 @@ All prompts surface in MCP clients as `/mcp__gadget-mcp__<name>`:
 
 | Prompt                           | Args                                         | Purpose |
 | -------------------------------- | -------------------------------------------- | ------- |
+| `gadget-author`                  | `category?` *(completes)*, `intent?`         | Teach the single-purpose authoring rule with live curated exemplars before the LLM calls `add-gadget` or `put-gadget`. |
 | `gadget-build-chain`             | `task`                                       | Walk the list → get → add → compose workflow for `task`. |
 | `gadget-build-system-prompt`     | `task`, `category?` *(completes)*            | Primary entry point when a user asks for a system prompt / persona / reviewer template — ends in `gadget.compose-prompt`. |
 | `gadget-align-repo`              | `focus?` *(completes: errors / tests / docs / ci / security)* | Audit the current working directory against the gadget-mcp engineering charter and produce a prioritized punch list. |
 | `gadget-inspect`                 | `id` *(completes over live ids + aliases)*   | Fetch and summarize a single gadget (content + revisions + aliases). |
 | `gadget-run-reviewer`            | `runnerId` *(completes)*, `prompt`           | Execute a configured reviewer runner against a prompt and summarize the output. |
 
-See [`docs/prompts.md`](docs/prompts.md) for the full contract of each.
+Server advertises `completions: {}` and responds correctly to
+`completion/complete`; some clients (e.g. Claude Code as of v2.1.107)
+don't yet surface prompt-arg autocomplete in their slash-command UI. See
+[`docs/prompts.md`](docs/prompts.md) for the full contract of each.
 
 ## Error codes
 
@@ -149,6 +157,9 @@ All MCP-surface errors are `McpError` with `data.gadgetCode`:
 
 - `gadget_tool_calls_total{tool,result}` — counter
 - `gadget_tool_call_duration_seconds{tool}` — histogram
+- `gadget_content_chars{tool}` — histogram of gadget content size
+  (buckets `50..8000`) recorded on every mutating write; watch for
+  drift away from the 150–250-char house style.
 - `gadget_gadgets_total`, `gadget_revisions_total`, `gadget_aliases_total`,
   `gadget_audit_rows_total`, `gadget_fts_rows_total` — gauges
 

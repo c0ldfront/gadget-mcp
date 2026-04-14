@@ -3,6 +3,80 @@
 All notable changes to `gadget-mcp` are documented here. Format adheres to
 [Keep a Changelog][kac] and versions follow [semver][semver].
 
+## [Unreleased]
+
+### Added
+
+- **Hard field caps on gadgets.** Constants `GADGET_TITLE_MAX=80`,
+  `GADGET_DESCRIPTION_MAX=200`, `GADGET_CONTENT_MAX=500` are exported from
+  `@gadget/core` and enforced at the Zod parse boundary for both `add-gadget`
+  and `put-gadget`. Over-cap writes reject with `gadget.invalidGadget`.
+- **Shape check for kitchen-sink gadgets.** Rejects bodies with more than
+  two markdown headings or more than one fenced code block. Opt out with
+  `GADGET_DISABLE_SHAPE_CHECK=1|true|yes|on`.
+- **Authoring rules in `add-gadget` / `put-gadget` tool descriptions.**
+  Targets ~150 chars, inline exemplars from the curated library, split-past-250
+  guidance — surfaced to the LLM at `tools/list` time.
+- **`gadget-author` prompt.** Pulls three live curated exemplars from the
+  repo at render time; takes optional `intent` and `category` args; teaches
+  the single-purpose/single-idea rule before authoring.
+- **Content-size observability.** New Prometheus histogram
+  `gadget_content_chars{tool="..."}` with buckets `50..8000`, recorded on
+  every mutating write. `notifications/message` payloads for mutations now
+  include a `contentChars` field. New method
+  `GadgetMetrics.recordGadgetContentChars(tool, chars)`.
+- **`gadget.list-gadgets` and `gadget.search-gadgets` return slim items.**
+  Six fields `{id, category, title, description, tags, content}` — full
+  `content` body (no preview truncation), and `source`/`createdAt`/`updatedAt`
+  dropped from the list payload for token efficiency. Same trim applied to
+  `gadget://gadgets/all`, `gadget://gadgets/category/{category}`, and
+  `gadget://gadgets/tag/{tag}` resources. New type `GadgetListItem` and
+  `toListItem` helper exported from `@gadget/core`.
+- **Full MCP SDK compliance on every tool.** All 17 tools now declare an
+  `outputSchema`, every input field carries `.describe()` per-arg help, and
+  annotations are standardized: `openWorldHint: false` on local tools
+  (`true` on `gadget.run-reviewer`), explicit `destructiveHint: false` on
+  reversible mutations, `idempotentHint: true` on `put-gadget` and
+  `delete-*`. Tags input now uses `GadgetTagSchema` so clients see the
+  kebab-case constraint.
+- **Extensible gadget packs.** New `GADGET_PACKS` env var enables opt-in
+  NDJSON bundles embedded in the binary (comma-separated names). First
+  pack: `tone-caveman` at `data/tone-caveman.ndjson` with three tone
+  gadgets (lite / full / ultra) capturing the intensity levels from
+  [JuliusBrussee/caveman][caveman]. Unknown pack names warn on stderr
+  without failing startup. Pack registry + parser in
+  `packages/server/src/cli.ts`.
+
+### Changed
+
+- **Default seed library swapped to the rpp-ts domain set.**
+  `data/gadgets.ndjson` is now 22 curated gadgets (5 role / 5 context /
+  5 constraint / 4 format / 3 tone) sized 98–251 chars — the house-style
+  anchors the authoring rules point the LLM at. Prior 20 meta-gadgets
+  preserved at `data/gadgets.ndjson.bak` for reference / re-import.
+- **Default seeds are now embedded in the compiled binary.** In a
+  `bun build --compile` binary, `import.meta.url` points into the bundled
+  virtual filesystem, so the previous path-based seeding silently no-op'd
+  whenever the binary was invoked from a CWD without `data/`. `maybeSeed`
+  now tries on-disk first (preserves dev workflow) and falls back to the
+  embedded payload. Binary is now zero-config: fresh DB anywhere auto-seeds
+  the 22 curated gadgets + 4 reviewer runners.
+- **Seed API refactor.** New public exports from `@gadget/core`:
+  `seedFromContent`, `seedGadgetsFromNdjson`, `seedRunnersFromJson`, and
+  type `SeedContent`. `seedFromFiles` retained and delegates to
+  `seedFromContent` for disk loads.
+
+### Known limitations
+
+- Claude Code v2.1.107 does NOT surface MCP prompt-argument autocomplete
+  in its slash-command UI. The server correctly advertises
+  `completions: {}` and responds to `completion/complete` for prompt args
+  (verified against the SDK client — see `packages/server/src/mcp/server.test.ts`),
+  but the Claude Code UI renders completions only for resource-template args.
+  Prompt-arg completion works in clients that wire it.
+
+[caveman]: https://github.com/JuliusBrussee/caveman
+
 ## [0.1.0] — 2026-04-14
 
 Initial release. Complete rewrite of the legacy `rpp-ts` project into a

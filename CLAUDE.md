@@ -19,8 +19,13 @@ export / import gadgets via the MCP protocol over stdio or Streamable HTTP.
   reviewer runners, NDJSON I/O, seeding). Exported under `@gadget/core`.
 - `packages/server` — MCP surface (tools, resources, prompts), auth, dual
   stdio + Streamable HTTP transports on `Bun.serve`, and the CLI.
-- `data/` — seed gadget catalog (`gadgets.ndjson`) and reviewer runners
-  (`reviewer_runners.json`).
+- `data/` — seed gadget catalog (`gadgets.ndjson` — 22 rpp-ts-style
+  domain gadgets; the prior meta-gadget set is preserved at
+  `gadgets.ndjson.bak`), reviewer runners (`reviewer_runners.json`),
+  and optional packs (`tone-caveman.ndjson`, enabled via
+  `GADGET_PACKS=tone-caveman`). All three seed files are embedded in
+  the compiled binary via Bun text-imports, so a fresh binary
+  auto-seeds without `data/` on disk.
 - `artifacts/` — runtime output (default DB path, backups).
 - `tests/` — end-to-end spec that spawns the CLI over both transports.
 - `bench/` — hot-path benchmarks with a baseline + regression gate.
@@ -92,6 +97,12 @@ Gadget MCP `compose-prompt` tool chaining these gadgets:
 - `constraint-snippy-error-registry`
 - `format-bun-paste-ready`
 - `tone-terse-engineering`
+
+> Those ids now live in `data/gadgets.ndjson.bak` — they were the
+> project's meta-gadget seed set before `data/gadgets.ndjson` was
+> swapped to the 22 rpp-ts-style domain gadgets. Re-import via
+> `gadget.import-gadgets` from the `.bak` if you want to recompose
+> `SYSTEM_PROMPT.md` against the live workspace.
 
 If you (a future Claude Code session) disagree with the prompt, update
 `SYSTEM_PROMPT.md` and `CLAUDE.md` in the same commit — keep them

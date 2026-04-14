@@ -14,7 +14,9 @@ Every runtime knob is an environment variable. There is no config file.
 | `GADGET_ORIGIN_ALLOWLIST`      | —                         | CSV of allowed `Origin` header values (strict equality).                    |
 | `GADGET_HTTP_ALLOWED_HOSTS`    | —                         | CSV of allowed `Host` header values (DNS-rebind mitigation).                |
 | `GADGET_HTTP_MAX_BODY_BYTES`   | `10485760` (10 MB)        | Cap on `Content-Length` for `/mcp` POSTs.                                   |
-| `GADGET_SEED`                  | `auto`                    | `auto` seeds from `data/` at startup; `off` skips.                          |
+| `GADGET_SEED`                  | `auto`                    | `auto` seeds from `data/` at startup (falls back to seeds embedded in the binary when files are absent); `off` skips. |
+| `GADGET_PACKS`                 | —                         | CSV of optional NDJSON packs embedded in the binary to seed alongside the default catalog. Available: `tone-caveman`. Unknown names warn on stderr without failing startup. |
+| `GADGET_DISABLE_SHAPE_CHECK`   | —                         | Set to `1|true|yes|on` to disable the add/put shape validator (rejects >2 markdown headings or >1 fenced code block). |
 | `GADGET_AUDIT_DAYS`            | `90`                      | Audit-log retention in days; pruned on startup.                             |
 
 ## CLI flags
@@ -50,10 +52,47 @@ metrics registry — no shared state.
 
 At startup the server seeds from:
 
-- `data/gadgets.ndjson` — curated gadget catalog (20 entries by default).
-- `data/reviewer_runners.json` — reviewer runner definitions.
+- `data/gadgets.ndjson` — curated gadget catalog (22 rpp-ts-style domain
+  gadgets: 5 role / 5 context / 5 constraint / 4 format / 3 tone).
+- `data/reviewer_runners.json` — reviewer runner definitions (4 entries).
 
-Set `GADGET_SEED=off` to skip this (useful in tests).
+Both files are **embedded into the compiled binary** via Bun text-imports,
+so a zero-config invocation (fresh `gadget.db`, no `data/` directory on
+disk) still produces a fully seeded library. When run from a source
+checkout the on-disk files win, which keeps the dev loop ergonomic.
+
+Seeding is additive: an id that already exists is left alone, so
+restarting never stomps a gadget you've edited via `put-gadget`.
+
+Set `GADGET_SEED=off` to skip seeding entirely (useful in tests).
+
+## Optional packs (`GADGET_PACKS`)
+
+Packs are opt-in bundles of curated gadgets also embedded in the binary.
+Enable one or more by name via the env var:
+
+```sh
+GADGET_PACKS=tone-caveman gadget-mcp serve --stdio
+```
+
+Packs seed *after* the default catalog and are additive — enabling a
+pack on an existing DB just adds the new ids on the next startup.
+
+| Pack          | Contents                                                     |
+| ------------- | ------------------------------------------------------------ |
+| `tone-caveman` | Three `tone-caveman-{lite,full,ultra}` gadgets capturing compression intensity levels (filler drop → article drop → telegraphic). Compose these with any role to tune output density. |
+
+Adding another pack is a two-step code change: drop `data/<name>.ndjson`
+and register it in the `GADGET_PACKS` object in `packages/server/src/cli.ts`.
+
+## Shape validation (`GADGET_DISABLE_SHAPE_CHECK`)
+
+Add/put reject gadget bodies with more than two markdown headings or
+more than one fenced code block — a heuristic against kitchen-sink
+gadgets that pack multiple ideas into one blob. Violations surface as
+`gadget.invalidGadget` with a `reason` data field (`too-many-headings`
+or `too-many-code-fences`). Set `GADGET_DISABLE_SHAPE_CHECK=1` to turn
+the check off when you need a dense snippet to land.
 
 ## Paths inside the Docker image
 
