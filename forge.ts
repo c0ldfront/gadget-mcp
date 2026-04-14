@@ -12,7 +12,7 @@
  */
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 interface PackageJson {
 	readonly name: string;
@@ -179,7 +179,10 @@ async function packageArtifacts(
 }
 
 async function tarGzSingleFile(src: string, dest: string): Promise<void> {
-	const proc = Bun.spawn(["tar", "-czf", dest, "-C", "target", basename(src).replace(/^/, "")], {
+	// -C <dir> changes into the directory the binary actually lives in
+	// (`target/<profile>/`), then tars just the basename so the archive
+	// contains a flat entry rather than a nested `target/release/...` path.
+	const proc = Bun.spawn(["tar", "-czf", dest, "-C", dirname(src), basename(src)], {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "ignore",
