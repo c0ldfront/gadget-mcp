@@ -32,9 +32,12 @@ jobs:
         run: bunx tsc --noEmit
       - name: Offline test suite (unit + e2e + harness)
         run: bun run test
-      - name: Forge build smoke (native triple only)
-        # Full cross-compile is exercised by release.yml on `v*` tags.
-        run: bun run forge.ts build --profile=debug --only=x64
+      - name: Forge build smoke (native glibc triple only)
+        # Full cross-compile (arm64, musl variants, darwin, windows) is
+        # exercised by release.yml on `v*` tags. Pin the exact triple here
+        # because canary Bun builds don't always publish every sidecar
+        # (musl in particular lags by a day or two on canary).
+        run: bun run forge.ts build --profile=debug --only=bun-linux-x64
 
   bench:
     name: benchmarks (regression guard)

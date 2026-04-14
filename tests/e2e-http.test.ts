@@ -70,8 +70,8 @@ test("HTTP lifecycle: initialize → tool call → explicit DELETE closes sessio
 	// session_opened must have fired during initialize.
 	const opened = logs.filter((e) => e.event === "session_opened");
 	expect(opened.length).toBeGreaterThanOrEqual(1);
-	expect(opened[0]?.data["workspace"]).toBe("default");
-	expect(opened[0]?.data["role"]).toBe("admin");
+	expect(opened[0]?.data.workspace).toBe("default");
+	expect(opened[0]?.data.role).toBe("admin");
 
 	// Explicit DELETE /mcp with the session id exercises the onsessionclosed
 	// path. Some client versions of the SDK don't send DELETE on close; this

@@ -103,8 +103,28 @@ async function build(
 	const outRoot = join(cfg.outDir, opts.profile);
 	await mkdir(outRoot, { recursive: true });
 	const produced: string[] = [];
+	// `--only` accepts:
+	//   * an exact triple (`bun-linux-x64`) — wins over substring matches,
+	//   * a comma-separated list of exact triples,
+	//   * a legacy substring (`linux`, `arm64`, `musl`).
+	// Exact matching is tried first so `--only=bun-linux-x64` no longer
+	// unintentionally selects `bun-linux-x64-musl`.
+	const onlyRaw = opts.only ?? null;
+	const onlyExact: readonly string[] | null =
+		onlyRaw !== null && onlyRaw.includes(",")
+			? onlyRaw.split(",").map((s) => s.trim()).filter((s) => s !== "")
+			: onlyRaw !== null
+				? [onlyRaw]
+				: null;
 	for (const triple of cfg.targets) {
-		if (opts.only !== undefined && opts.only !== null && !triple.includes(opts.only)) continue;
+		if (onlyExact !== null) {
+			const exact = onlyExact.some((t) => t === triple);
+			const substring = !exact && onlyExact.length === 1 && onlyRaw !== null && triple.includes(onlyRaw);
+			if (!exact && !substring) continue;
+			// If any exact match is declared in the --only list, substring
+			// fallback is disabled to avoid picking up musl for `x64`, etc.
+			if (!exact && onlyExact.some((t) => cfg.targets.includes(t))) continue;
+		}
 		const out = join(outRoot, `${cfg.binary}-${triple}`);
 		const args = [
 			"build",
