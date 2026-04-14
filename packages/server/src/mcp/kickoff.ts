@@ -424,9 +424,14 @@ export async function runKickoff(
 			},
 		},
 	});
+	// The integrations field is optional, so the client is free to return an
+	// empty object (or a non-string value) when the user submits with the field
+	// blank. Guard against both instead of blindly calling `.split`.
+	const rawIntegrations =
+		integrations.action === "accept" ? integrations.content?.integrations : undefined;
 	const integrationList =
-		integrations.action === "accept" && integrations.content !== undefined
-			? integrations.content.integrations
+		typeof rawIntegrations === "string"
+			? rawIntegrations
 					.split(",")
 					.map((s) => s.trim())
 					.filter((s) => s !== "")

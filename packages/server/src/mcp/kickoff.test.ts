@@ -158,6 +158,21 @@ describe("runKickoff (elicitation orchestration)", () => {
 		return { runner, calls };
 	}
 
+	test("tolerates an empty integrations response (client omits the optional field)", async () => {
+		const repo = seededRepo();
+		const { runner } = stubRunner([
+			{ action: "accept", content: { name: "demo", path: "/tmp/demo", goal: "Demo." } },
+			{ action: "accept", content: { projectType: "cli" } },
+			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
+			// User submitted the form blank — client returned `{ content: {} }`.
+			{ action: "accept", content: {} },
+			{ action: "accept", content: { action: "return" } },
+		]);
+		const res = await runKickoff(runner, repo, async () => "");
+		expect(res.action).toBe("returned");
+		expect(res.prompt).toContain("Integrations: (none specified)");
+	});
+
 	test("returns `cancelled` when the first step is declined", async () => {
 		const repo = seededRepo();
 		const { runner } = stubRunner([{ action: "cancel" }]);
