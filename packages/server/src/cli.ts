@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { resolveRetentionMs, seedFromContent, seedFromFiles } from "@gadget/core";
 import embeddedGadgetsNdjson from "../../../data/gadgets.ndjson" with { type: "text" };
 import embeddedRunnersJsonRaw from "../../../data/reviewer_runners.json" with { type: "text" };
+import embeddedToneCavemanNdjson from "../../../data/tone-caveman.ndjson" with { type: "text" };
 import { FORMATS, type GenerateFormat, generateConfig, isGenerateFormat } from "./cli-generate.ts";
 import { parseOriginAllowlist, parseTokens } from "./mcp/auth.ts";
 import { SERVER_NAME, SERVER_VERSION } from "./mcp/server.ts";
@@ -14,6 +15,34 @@ import { parseWorkspaces, WorkspaceRegistry } from "./workspace.ts";
 // TS picks up resolveJsonModule for .json imports and types this as the parsed
 // array; at runtime Bun's `with { type: "text" }` hands back the raw string.
 const embeddedRunnersJson = embeddedRunnersJsonRaw as unknown as string;
+
+// Optional gadget packs — enabled via the `GADGET_PACKS` env var (comma-separated
+// list of pack names). Each pack is an NDJSON bundle embedded in the binary.
+const GADGET_PACKS: Record<string, string> = {
+	"tone-caveman": embeddedToneCavemanNdjson,
+};
+
+export function parseEnabledPacks(raw: string | undefined): {
+	enabled: readonly string[];
+	unknown: readonly string[];
+} {
+	if (raw === undefined || raw.trim() === "") return { enabled: [], unknown: [] };
+	const seen = new Set<string>();
+	const enabled: string[] = [];
+	const unknown: string[] = [];
+	for (const tok of raw.split(",")) {
+		const name = tok.trim();
+		if (name === "" || seen.has(name)) continue;
+		seen.add(name);
+		if (Object.hasOwn(GADGET_PACKS, name)) enabled.push(name);
+		else unknown.push(name);
+	}
+	return { enabled, unknown };
+}
+
+export function availableGadgetPacks(): readonly string[] {
+	return Object.keys(GADGET_PACKS).sort();
+}
 
 interface ParsedCli {
 	readonly command: "serve" | "backup" | "restore" | "generate" | "audit-tail" | "help" | "version";
@@ -51,6 +80,8 @@ ENVIRONMENT
   GADGET_HTTP_TOKENS       CSV of token:role pairs (reader|writer|admin)
   GADGET_ORIGIN_ALLOWLIST  CSV of allowed Origin values
   GADGET_SEED              'auto' (default) to seed from data/ at startup, or 'off'
+  GADGET_PACKS             CSV of optional embedded gadget packs to seed
+                           (available: tone-caveman)
   GADGET_AUDIT_DAYS        Audit retention in days (default 90)
 `;
 
@@ -212,12 +243,24 @@ async function maybeSeed(registry: WorkspaceRegistry, workspace: string): Promis
 			gadgetsNdjsonPath: gadgetsPath,
 			reviewerRunnersJsonPath: runnersPath,
 		});
-		if (fromDisk.gadgetsSeeded > 0 || fromDisk.runnersSeeded > 0) return;
-		// No on-disk data files found (typical for compiled binaries) — fall back to embedded seeds.
-		seedFromContent(ws.repo, ws.runnerRepo, {
-			gadgetsNdjson: embeddedGadgetsNdjson,
-			reviewerRunnersJson: embeddedRunnersJson,
-		});
+		if (fromDisk.gadgetsSeeded === 0 && fromDisk.runnersSeeded === 0) {
+			// No on-disk data files found (typical for compiled binaries) — fall back to embedded seeds.
+			seedFromContent(ws.repo, ws.runnerRepo, {
+				gadgetsNdjson: embeddedGadgetsNdjson,
+				reviewerRunnersJson: embeddedRunnersJson,
+			});
+		}
+		const { enabled, unknown } = parseEnabledPacks(Bun.env.GADGET_PACKS);
+		for (const name of unknown) {
+			process.stderr.write(
+				`unknown gadget pack: ${name} (available: ${availableGadgetPacks().join(", ")})\n`,
+			);
+		}
+		for (const name of enabled) {
+			const ndjson = GADGET_PACKS[name];
+			if (ndjson === undefined) continue;
+			seedFromContent(ws.repo, ws.runnerRepo, { gadgetsNdjson: ndjson });
+		}
 	} catch (err) {
 		process.stderr.write(`seed skipped: ${(err as Error).message}\n`);
 	}
