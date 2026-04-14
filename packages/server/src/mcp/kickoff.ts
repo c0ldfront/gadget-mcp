@@ -36,11 +36,14 @@ export interface ChainItem {
 	readonly title: string;
 }
 
+export type KickoffAction = "returned" | "task-dispatch" | "sampled" | "cancelled";
+
 export interface KickoffResult {
 	readonly prompt: string;
 	readonly chain: readonly ChainItem[];
-	readonly action: "returned" | "executed" | "cancelled";
-	readonly executedCommand?: string;
+	readonly action: KickoffAction;
+	readonly dispatchHint?: string;
+	readonly sampled?: { readonly text: string };
 }
 
 // ── selection heuristic ─────────────────────────────────────────────────────
@@ -312,22 +315,27 @@ interface IntegrationsPayload {
 }
 
 interface PreviewPayload {
-	action: "return" | "execute" | "cancel";
+	action: "return" | "task" | "sample" | "cancel";
 }
 
 /**
- * Run the full five-step interview, compose the prompt, and optionally
- * spawn the configured executor. Returns a `KickoffResult` describing
- * what happened.
+ * Run the interview, compose the prompt, and dispatch according to the
+ * user's preview-step pick. Three mutually-exclusive dispatch modes
+ * demonstrate the three MCP server-driven continuation primitives:
+ *
+ *  - `return` — plain tool result. LLM reads the prompt and decides.
+ *  - `task`   — tool result + explicit `dispatchHint` asking the LLM
+ *               to use its Task subagent in the target path.
+ *  - `sample` — server calls `sampling/createMessage` with the prompt
+ *               and returns whatever the host model produced.
  *
  * Graceful fallback: if any elicitation throws (client lacks support),
- * the outer caller catches and returns a template.
+ * the outer caller catches and surfaces a helpful error.
  */
 export async function runKickoff(
 	runner: KickoffRunner,
 	repo: GadgetRepo,
-	env: { GADGET_KICKOFF_EXEC?: string | undefined },
-	spawn: (command: string, cwd: string, stdin: string) => Promise<number>,
+	sample: (prompt: string) => Promise<string>,
 ): Promise<KickoffResult> {
 	const basics = await runner.elicit<BasicsPayload>({
 		message: "Project basics — what are you building, and where?",
@@ -438,16 +446,22 @@ export async function runKickoff(
 	const prompt = assemblePrompt(repo, answers, chain);
 
 	const preview = await runner.elicit<PreviewPayload>({
-		message: `Preview (${prompt.length} chars, ${chain.length} gadgets):\n\n${prompt}\n\nWhat next?`,
+		message: `Preview (${prompt.length} chars, ${chain.length} gadgets):\n\n${prompt}\n\nPick a dispatch mode.`,
 		requestedSchema: {
 			type: "object",
 			properties: {
 				action: {
 					type: "string",
-					title: "Action",
+					title: "Dispatch mode",
 					description:
-						"`return` hands the paragraph back; `execute` spawns $GADGET_KICKOFF_EXEC in the project path; `cancel` aborts.",
-					enum: ["return", "execute", "cancel"],
+						"`return` hands the paragraph back; `task` adds a dispatchHint asking the calling LLM to spawn a Task subagent in the target path; `sample` asks the host to run one LLM turn with the prompt and surfaces the response; `cancel` aborts.",
+					enum: ["return", "task", "sample", "cancel"],
+					enumNames: [
+						"return — plain tool result",
+						"task  — tool result + Task dispatch hint",
+						"sample — server asks host to run one LLM turn",
+						"cancel",
+					],
 					default: "return",
 				},
 			},
@@ -457,20 +471,25 @@ export async function runKickoff(
 	if (preview.action !== "accept" || preview.content === undefined) {
 		return { prompt, chain, action: "cancelled" };
 	}
-	if (preview.content.action === "cancel") {
-		return { prompt, chain, action: "cancelled" };
-	}
-	if (preview.content.action === "execute") {
-		const cmd = env.GADGET_KICKOFF_EXEC;
-		if (cmd === undefined || cmd === "") {
-			return { prompt, chain, action: "returned" };
+	switch (preview.content.action) {
+		case "cancel":
+			return { prompt, chain, action: "cancelled" };
+		case "task":
+			return {
+				prompt,
+				chain,
+				action: "task-dispatch",
+				dispatchHint: `Dispatch this prompt to a Task subagent with cwd set to \`${answers.path}\`. Do NOT continue the build inline in the current conversation — use your Task tool so the subagent gets its own context window.`,
+			};
+		case "sample": {
+			try {
+				const sampledText = await sample(prompt);
+				return { prompt, chain, action: "sampled", sampled: { text: sampledText } };
+			} catch {
+				return { prompt, chain, action: "returned" };
+			}
 		}
-		try {
-			await spawn(cmd, answers.path, prompt);
-			return { prompt, chain, action: "executed", executedCommand: cmd };
-		} catch {
+		default:
 			return { prompt, chain, action: "returned" };
-		}
 	}
-	return { prompt, chain, action: "returned" };
 }

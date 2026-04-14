@@ -7,6 +7,24 @@ All notable changes to `gadget-mcp` are documented here. Format adheres to
 
 ### Changed
 
+- **`gadget.project-kickoff` preview step replaces `execute` with three
+  MCP-native dispatch modes.** Previously picking `execute` tried to
+  spawn `$GADGET_KICKOFF_EXEC` as a subprocess — brittle (bare `claude`
+  doesn't ingest stdin; required wrapper scripts) and the wrong
+  abstraction (MCP servers can't "fork" the host agent, but they can
+  leverage its primitives in-process). New modes:
+    - `return` — plain tool result. The LLM in the current session
+      reads the composed prompt and decides next steps.
+    - `task` — tool result + `dispatchHint` field instructing the
+      calling LLM to spawn a Task subagent with the prompt and the
+      target project path as cwd. No new process; same session; fresh
+      context for the subagent.
+    - `sample` — server calls `sampling/createMessage` with the prompt
+      and surfaces the host model's response as a `sampled.text` field
+      on the tool result. Lets the server "borrow" one LLM turn.
+  The `GADGET_KICKOFF_EXEC` env var is now unused and will be removed
+  in a future release. Existing tests, public types
+  (`KickoffAction`, `KickoffResult`), and outputSchema are updated.
 - **`gadget.project-kickoff` now emits a full actionable baseline prompt
   regardless of library state.** The tool previously relied entirely on
   tag/keyword matches in the gadget library; when nothing matched (the

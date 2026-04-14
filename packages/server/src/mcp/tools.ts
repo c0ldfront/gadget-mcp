@@ -748,20 +748,28 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 						)
 						.describe("Gadget ids that contributed to the chain, in canonical order."),
 					action: z
-						.enum(["returned", "executed", "cancelled"])
+						.enum(["returned", "task-dispatch", "sampled", "cancelled"])
 						.describe(
-							"`returned` = paragraph only; `executed` = spawned $GADGET_KICKOFF_EXEC; `cancelled` = user bailed at preview or an earlier step.",
+							"`returned` = plain tool result (LLM reads + decides); `task-dispatch` = tool result + dispatchHint asking the calling LLM to spawn a Task subagent in the target path; `sampled` = server called sampling/createMessage and surfaces the host-model response; `cancelled` = user bailed.",
 						),
-					executedCommand: z
+					dispatchHint: z
 						.string()
 						.optional()
-						.describe("Command that was spawned when action=executed."),
+						.describe(
+							"Present when action=task-dispatch. Tells the calling LLM to spawn a Task subagent with this prompt in the target project path instead of running inline.",
+						),
+					sampled: z
+						.object({ text: z.string() })
+						.optional()
+						.describe(
+							"Present when action=sampled. Contains the host LLM's response to the composed prompt.",
+						),
 				},
 				annotations: {
 					readOnlyHint: false,
 					destructiveHint: false,
 					idempotentHint: false,
-					openWorldHint: true,
+					openWorldHint: false,
 				},
 			},
 			wrapHandler<Record<string, never>>(server, ctx, "gadget.project-kickoff", async () => {
@@ -770,26 +778,24 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 					const result = await runKickoff(
 						mcpRunner(server, timeoutMs),
 						ctx.repo,
-						{ GADGET_KICKOFF_EXEC: Bun.env.GADGET_KICKOFF_EXEC },
-						async (command, cwd, stdin) => {
-							const proc = Bun.spawn([command], {
-								cwd,
-								stdin: "pipe",
-								stdout: "inherit",
-								stderr: "inherit",
-							});
-							proc.stdin.write(stdin);
-							await proc.stdin.end();
-							return await proc.exited;
+						async (prompt) => {
+							const res = await server.server.createMessage(
+								{
+									messages: [{ role: "user", content: { type: "text", text: prompt } }],
+									maxTokens: 2048,
+								},
+								{ timeout: timeoutMs },
+							);
+							if (res.content.type === "text") return res.content.text;
+							return "(non-text sampling response)";
 						},
 					);
 					return structured({
 						prompt: result.prompt,
 						chain: result.chain,
 						action: result.action,
-						...(result.executedCommand !== undefined
-							? { executedCommand: result.executedCommand }
-							: {}),
+						...(result.dispatchHint !== undefined ? { dispatchHint: result.dispatchHint } : {}),
+						...(result.sampled !== undefined ? { sampled: result.sampled } : {}),
 					});
 				} catch (err) {
 					throw gadgetMcpError({

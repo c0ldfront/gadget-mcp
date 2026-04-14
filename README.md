@@ -66,8 +66,7 @@ Absent `--stdio` or `--http`, `serve` defaults to Streamable HTTP.
 | `GADGET_SEED`                  | `auto` (default) seeds from `data/` — or the payload embedded in the binary when files are absent; `off` skips | `auto`                   |
 | `GADGET_PACKS`                 | CSV of opt-in NDJSON packs embedded in the binary (e.g. `tone-caveman`) | — |
 | `GADGET_DISABLE_SHAPE_CHECK`   | Set to `1\|true\|yes\|on` to disable the heading/code-fence shape guard on add/put | — |
-| `GADGET_KICKOFF_EXEC`          | Executable spawned by `gadget.project-kickoff` when the user picks `execute` at the preview step | —        |
-| `GADGET_KICKOFF_TIMEOUT_MS`    | Per-step elicitation timeout for `gadget.project-kickoff` (raise for slow form-filling) | `600000` (10 min) |
+| `GADGET_KICKOFF_TIMEOUT_MS`    | Per-step elicitation timeout for `gadget.project-kickoff` (also used for the `sample` mode) | `600000` (10 min) |
 | `GADGET_AUDIT_DAYS`            | Audit retention in days                                      | `90`                     |
 
 ## Tools (MCP)

@@ -161,7 +161,7 @@ describe("runKickoff (elicitation orchestration)", () => {
 	test("returns `cancelled` when the first step is declined", async () => {
 		const repo = seededRepo();
 		const { runner } = stubRunner([{ action: "cancel" }]);
-		const res = await runKickoff(runner, repo, {}, async () => 0);
+		const res = await runKickoff(runner, repo, async () => "");
 		expect(res.action).toBe("cancelled");
 	});
 
@@ -177,50 +177,57 @@ describe("runKickoff (elicitation orchestration)", () => {
 			{ action: "accept", content: { integrations: "" } },
 			{ action: "accept", content: { action: "return" } },
 		]);
-		const res = await runKickoff(runner, repo, {}, async () => 0);
+		const res = await runKickoff(runner, repo, async () => "");
 		expect(res.action).toBe("returned");
 		expect(res.prompt.length).toBeGreaterThan(0);
 	});
 
-	test("returns `executed` when action=execute and GADGET_KICKOFF_EXEC is set", async () => {
-		const repo = seededRepo();
-		const { runner } = stubRunner([
-			{
-				action: "accept",
-				content: { name: "demo", path: "/tmp/demo", goal: "Demo." },
-			},
-			{ action: "accept", content: { projectType: "cli" } },
-			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
-			{ action: "accept", content: { integrations: "" } },
-			{ action: "accept", content: { action: "execute" } },
-		]);
-		type Spawn = { command: string; cwd: string; stdin: string };
-		let spawned: Spawn | null = null;
-		const res = await runKickoff(
-			runner,
-			repo,
-			{ GADGET_KICKOFF_EXEC: "echo" },
-			async (c, cwd, stdin): Promise<number> => {
-				spawned = { command: c, cwd, stdin } satisfies Spawn;
-				return 0;
-			},
-		);
-		expect(res.action).toBe("executed");
-		const captured = spawned as Spawn | null;
-		expect(captured).not.toBeNull();
-		expect(captured?.command).toBe("echo");
-	});
-
-	test("falls back to `returned` when action=execute but GADGET_KICKOFF_EXEC is unset", async () => {
+	test("returns `task-dispatch` with a dispatch hint when the user picks task mode", async () => {
 		const repo = seededRepo();
 		const { runner } = stubRunner([
 			{ action: "accept", content: { name: "demo", path: "/tmp/demo", goal: "Demo." } },
 			{ action: "accept", content: { projectType: "cli" } },
 			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
 			{ action: "accept", content: { integrations: "" } },
-			{ action: "accept", content: { action: "execute" } },
+			{ action: "accept", content: { action: "task" } },
 		]);
-		const res = await runKickoff(runner, repo, {}, async () => 0);
+		const res = await runKickoff(runner, repo, async () => "");
+		expect(res.action).toBe("task-dispatch");
+		expect(res.dispatchHint ?? "").toContain("/tmp/demo");
+		expect(res.dispatchHint ?? "").toContain("Task");
+	});
+
+	test("returns `sampled` with the host's response when the user picks sample mode", async () => {
+		const repo = seededRepo();
+		const { runner } = stubRunner([
+			{ action: "accept", content: { name: "demo", path: "/tmp/demo", goal: "Demo." } },
+			{ action: "accept", content: { projectType: "cli" } },
+			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
+			{ action: "accept", content: { integrations: "" } },
+			{ action: "accept", content: { action: "sample" } },
+		]);
+		let sampledWith = "";
+		const res = await runKickoff(runner, repo, async (prompt) => {
+			sampledWith = prompt;
+			return "simulated-host-response";
+		});
+		expect(res.action).toBe("sampled");
+		expect(res.sampled?.text).toBe("simulated-host-response");
+		expect(sampledWith.length).toBeGreaterThan(0);
+	});
+
+	test("falls back to `returned` when sampling throws", async () => {
+		const repo = seededRepo();
+		const { runner } = stubRunner([
+			{ action: "accept", content: { name: "demo", path: "/tmp/demo", goal: "Demo." } },
+			{ action: "accept", content: { projectType: "cli" } },
+			{ action: "accept", content: { runtime: "bun", qualityBar: "prototype" } },
+			{ action: "accept", content: { integrations: "" } },
+			{ action: "accept", content: { action: "sample" } },
+		]);
+		const res = await runKickoff(runner, repo, async () => {
+			throw new Error("host refused sampling");
+		});
 		expect(res.action).toBe("returned");
 	});
 });
