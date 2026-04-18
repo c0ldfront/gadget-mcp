@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectBinary, parseCli } from "./cli.ts";
+import { detectBinary, parseCli, runHealthcheck } from "./cli.ts";
 
 test("parseCli defaults command to serve", () => {
 	expect(parseCli([]).command).toBe("serve");
@@ -54,5 +54,53 @@ describe("detectBinary", () => {
 
 	test("falls back when argv0 is empty", () => {
 		expect(detectBinary("")).toBe("gadget-mcp");
+	});
+});
+
+describe("runHealthcheck", () => {
+	test("parseCli recognizes the healthcheck command", () => {
+		expect(parseCli(["healthcheck"]).command).toBe("healthcheck");
+		expect(parseCli(["healthcheck", "--port=9999"]).port).toBe(9999);
+	});
+
+	test("returns 0 against a live 200 /healthz", async () => {
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: (req) => {
+				if (new URL(req.url).pathname === "/healthz") return new Response("ok");
+				return new Response("nope", { status: 404 });
+			},
+		});
+		try {
+			const code = await runHealthcheck(
+				parseCli(["healthcheck", `--host=127.0.0.1`, `--port=${server.port}`]),
+			);
+			expect(code).toBe(0);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	test("returns 1 when server is unreachable", async () => {
+		// Port 1 is a reserved low port; nothing will be listening.
+		const code = await runHealthcheck(parseCli(["healthcheck", "--host=127.0.0.1", "--port=1"]));
+		expect(code).toBe(1);
+	});
+
+	test("returns 1 when endpoint responds non-200", async () => {
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: () => new Response("not ready", { status: 503 }),
+		});
+		try {
+			const code = await runHealthcheck(
+				parseCli(["healthcheck", "--host=127.0.0.1", `--port=${server.port}`]),
+			);
+			expect(code).toBe(1);
+		} finally {
+			server.stop(true);
+		}
 	});
 });

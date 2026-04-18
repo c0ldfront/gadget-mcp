@@ -45,7 +45,15 @@ export function availableGadgetPacks(): readonly string[] {
 }
 
 interface ParsedCli {
-	readonly command: "serve" | "backup" | "restore" | "generate" | "audit-tail" | "help" | "version";
+	readonly command:
+		| "serve"
+		| "backup"
+		| "restore"
+		| "generate"
+		| "audit-tail"
+		| "healthcheck"
+		| "help"
+		| "version";
 	readonly stdio?: boolean;
 	readonly http?: boolean;
 	readonly workspace?: string;
@@ -68,6 +76,7 @@ USAGE
   gadget-mcp [serve] [--stdio | --http] [--workspace=NAME] [--host=HOST] [--port=N]
   gadget-mcp backup  --out PATH [--workspace=NAME]
   gadget-mcp restore --in PATH [--workspace=NAME]
+  gadget-mcp healthcheck [--host=HOST] [--port=N]
   gadget-mcp audit tail [N]
   gadget-mcp generate <${FORMATS.join("|")}> [--stdio (default) | --http --url URL] [--binary PATH] [--token T] [--workspace NAME] [--out PATH]
   gadget-mcp --version
@@ -117,7 +126,7 @@ export function parseCli(args: readonly string[]): ParsedCli {
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
 		if (a === undefined) continue;
-		if (a === "serve" || a === "backup" || a === "restore") {
+		if (a === "serve" || a === "backup" || a === "restore" || a === "healthcheck") {
 			command = a;
 			continue;
 		}
@@ -403,6 +412,31 @@ async function runGenerate(cli: ParsedCli): Promise<void> {
 	}
 }
 
+/**
+ * Self-contained liveness probe for distroless / scratch containers that
+ * have no `curl` or `wget`. Returns the exit code the caller should use
+ * so a HEALTHCHECK CMD can read it: `0` = healthy, `1` = not.
+ */
+export async function runHealthcheck(cli: ParsedCli): Promise<0 | 1> {
+	const host = cli.host ?? Bun.env.GADGET_HTTP_HOST ?? "127.0.0.1";
+	const port = cli.port ?? Number.parseInt(Bun.env.GADGET_HTTP_PORT ?? "7878", 10);
+	// Hit the container from inside on loopback — bind host may be 0.0.0.0,
+	// which isn't a valid destination address, so normalize to 127.0.0.1.
+	const target = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+	const url = `http://${target}:${port}/healthz`;
+	try {
+		const res = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+		if (res.status !== 200) {
+			process.stderr.write(`healthcheck: ${url} -> ${res.status}\n`);
+			return 1;
+		}
+		return 0;
+	} catch (err) {
+		process.stderr.write(`healthcheck: ${url} -> ${(err as Error).message}\n`);
+		return 1;
+	}
+}
+
 export async function main(argv: readonly string[]): Promise<void> {
 	const cli = parseCli(argv);
 	if (cli.command === "version") {
@@ -432,6 +466,11 @@ export async function main(argv: readonly string[]): Promise<void> {
 		await runAuditTail(registry, workspace, cli.limit ?? 50);
 		registry.closeAll();
 		return;
+	}
+	if (cli.command === "healthcheck") {
+		registry.closeAll();
+		const code = await runHealthcheck(cli);
+		process.exit(code);
 	}
 	if (cli.command === "generate") {
 		await runGenerate(cli);
