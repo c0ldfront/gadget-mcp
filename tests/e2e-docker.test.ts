@@ -64,6 +64,16 @@ describe.skipIf(!ENABLED)("docker image regression", () => {
 		port = 40000 + Math.floor(Math.random() * 20_000);
 		baseUrl = `http://127.0.0.1:${port}`;
 
+		// Create the named volume explicitly so afterAll can always remove it
+		// by name — `docker run -v` would auto-create it, but then a failed
+		// run would leak the volume without us knowing to clean it up.
+		const volCreate = await run([ENGINE, "volume", "create", volumeName], {
+			timeoutMs: 10_000,
+		});
+		if (volCreate.code !== 0) {
+			throw new Error(`volume create failed:\n${volCreate.stderr || volCreate.stdout}`);
+		}
+
 		// Use a named volume, not a host bind-mount: the distroless `nonroot`
 		// user (UID 65532) cannot write to a tmp dir owned by the host user.
 		const runRes = await run(
