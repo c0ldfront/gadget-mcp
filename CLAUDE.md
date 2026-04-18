@@ -2,7 +2,7 @@
 
 This file is loaded into every Claude Code conversation opened in this
 repository. It is the short-form project charter for the model. The full
-agent contract is in `SYSTEM_PROMPT.md`; this file is the 60-second version.
+agent contract is in `docs/SYSTEM_PROMPT.md`; this file is the 60-second version.
 
 ## What this project is
 
@@ -36,7 +36,7 @@ export / import gadgets via the MCP protocol over stdio or Streamable HTTP.
   / PR), `release.yml` (on `v*` tags: build + SBOM + provenance
   attestation + ghcr.io container), `bench-seed.yml` (manual
   workflow_dispatch to re-baseline on GHA hardware).
-- `SYSTEM_PROMPT.md` — the composed-via-Gadget system prompt that drives
+- `docs/SYSTEM_PROMPT.md` — the composed-via-Gadget system prompt that drives
   the autonomous build loop. Current chain is 29 gadgets covering all
   nine canonical slots; see the file's top-of-file table for ids.
 
@@ -79,7 +79,7 @@ export / import gadgets via the MCP protocol over stdio or Streamable HTTP.
 
 ## The composed system prompt
 
-`SYSTEM_PROMPT.md` is the live, in-tree copy of the system prompt that
+`docs/SYSTEM_PROMPT.md` is the live, in-tree copy of the system prompt that
 drives this project's autonomous build loop. It was produced via the
 Gadget MCP `compose-prompt` tool chaining these gadgets:
 
@@ -102,10 +102,10 @@ Gadget MCP `compose-prompt` tool chaining these gadgets:
 > project's meta-gadget seed set before `data/gadgets.ndjson` was
 > swapped to the 22 rpp-ts-style domain gadgets. Re-import via
 > `gadget.import-gadgets` from the `.bak` if you want to recompose
-> `SYSTEM_PROMPT.md` against the live workspace.
+> `docs/SYSTEM_PROMPT.md` against the live workspace.
 
 If you (a future Claude Code session) disagree with the prompt, update
-`SYSTEM_PROMPT.md` and `CLAUDE.md` in the same commit — keep them
+`docs/SYSTEM_PROMPT.md` and `CLAUDE.md` in the same commit — keep them
 coherent.
 
 ## Quick commands
