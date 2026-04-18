@@ -39,7 +39,7 @@ The container entrypoint is `gadget-mcp --http`. The image hard-codes:
 | `GADGET_DB`          | `/data/gadget.db` | Mount `/data` as a volume to persist gadgets.          |
 
 Everything else from [configuration.md](./configuration.md) still applies —
-pass `-e GADGET_AUTH_TOKENS=...`, `-e GADGET_ORIGIN_ALLOWLIST=...`, etc.
+pass `-e GADGET_HTTP_TOKENS=...`, `-e GADGET_ORIGIN_ALLOWLIST=...`, etc.
 
 ## Volumes and bind-mount ownership
 
@@ -107,7 +107,7 @@ distroless has none by design.
 
 ## Auth
 
-With no `GADGET_AUTH_TOKENS` set, HTTP callers resolve to the `admin` role.
+With no `GADGET_HTTP_TOKENS` set, HTTP callers resolve to the `admin` role.
 That is fine for a laptop smoke test but unacceptable for anything exposed
 beyond loopback. Before publishing the port, set tokens:
 
@@ -115,7 +115,7 @@ beyond loopback. Before publishing the port, set tokens:
 docker run --rm -d \
   -p 7878:7878 \
   -v gadget-data:/data \
-  -e GADGET_AUTH_TOKENS='admin:$ADMIN_TOKEN,reader:$READ_TOKEN' \
+  -e GADGET_HTTP_TOKENS='admin:$ADMIN_TOKEN,reader:$READ_TOKEN' \
   ghcr.io/c0ldfront/gadget-mcp:v0.3.0
 ```
 
@@ -170,7 +170,7 @@ workstations or remote deployments.
 }
 ```
 
-Drop the `headers` block if you run without `GADGET_AUTH_TOKENS`. For any
+Drop the `headers` block if you run without `GADGET_HTTP_TOKENS`. For any
 non-loopback deployment, terminate TLS in front of the container and keep
 the token in an environment variable on the client side — never inline it.
 
@@ -179,7 +179,7 @@ the token in an environment variable on the client side — never inline it.
 A ready-to-use [compose.yaml](../compose.yaml) lives at the repo root:
 
 ```sh
-# edit compose.yaml if you want to set GADGET_AUTH_TOKENS, then:
+# edit compose.yaml if you want to set GADGET_HTTP_TOKENS, then:
 docker compose up -d
 docker compose logs -f
 docker compose down        # stop; keep the gadget-mcp-data volume

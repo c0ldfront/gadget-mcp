@@ -19,7 +19,7 @@ services:
     environment:
       # Required for any non-loopback exposure. Generate with:
       #   python -c 'import secrets; print(secrets.token_urlsafe(32))'
-      GADGET_AUTH_TOKENS: "${GADGET_AUTH_TOKENS:-}"
+      GADGET_HTTP_TOKENS: "${GADGET_HTTP_TOKENS:-}"
       # Comma-separated list of browser origins allowed to call /mcp.
       GADGET_ORIGIN_ALLOWLIST: "${GADGET_ORIGIN_ALLOWLIST:-}"
       # Optional: enable the caveman tone pack at seed time.
