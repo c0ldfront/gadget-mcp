@@ -1,0 +1,43 @@
+# gadget-mcp — local / single-host Docker Compose deployment.
+#
+#   docker compose up -d       # pull (or build), start, persist /data
+#   docker compose logs -f     # tail server output
+#   docker compose down        # stop + remove container (volume persists)
+#   docker compose down -v     # also delete the gadgets DB volume
+#
+# The default stanza pulls the published image. Flip `image:` for `build: .`
+# if you want to iterate on the Dockerfile without pushing a tag.
+
+services:
+  gadget-mcp:
+    image: ghcr.io/c0ldfront/gadget-mcp:latest
+    # build: .
+    container_name: gadget-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7878:7878"
+    environment:
+      # Required for any non-loopback exposure. Generate with:
+      #   python -c 'import secrets; print(secrets.token_urlsafe(32))'
+      GADGET_AUTH_TOKENS: "${GADGET_AUTH_TOKENS:-}"
+      # Comma-separated list of browser origins allowed to call /mcp.
+      GADGET_ORIGIN_ALLOWLIST: "${GADGET_ORIGIN_ALLOWLIST:-}"
+      # Optional: enable the caveman tone pack at seed time.
+      # GADGET_PACKS: "tone-caveman"
+      GADGET_HTTP_HOST: "0.0.0.0"
+      GADGET_HTTP_PORT: "7878"
+      GADGET_DB: "/data/gadget.db"
+    volumes:
+      - gadget-data:/data
+    # The image ships a HEALTHCHECK already; this block just tightens the
+    # cadence. Remove it to inherit the Dockerfile defaults.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gadget-mcp", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  gadget-data:
+    name: gadget-mcp-data

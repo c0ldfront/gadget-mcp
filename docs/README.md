@@ -12,6 +12,7 @@
 | [benchmarks.md][bench]      | Hot-path benches and the CI regression gate.                         |
 | [migrations.md][mig]        | Schema migrations and breaking-change procedure.                     |
 | [release.md][rel]           | How `v*` tag pushes drive the GitHub Actions release pipeline.       |
+| [docker.md][dk]             | Distroless image, `.mcp.json` wiring, compose, regression tests.     |
 | [live-tests.md][live]       | Opt-in LLM-discovery smoke suite (claude + codex).                   |
 | [prompts.md][pr]            | Per-prompt contract and argument completion.                         |
 
@@ -27,6 +28,7 @@ See the repository [README][readme] for install + quick-start.
 [bench]: ./benchmarks.md
 [mig]: ./migrations.md
 [rel]: ./release.md
+[dk]: ./docker.md
 [live]: ./live-tests.md
 [pr]: ./prompts.md
 [readme]: ../README.md
