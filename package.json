@@ -1,6 +1,6 @@
 {
 	"name": "gadget-mcp",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"type": "module",
 	"private": true,
 	"description": "Return-prompt MCP server managing a persistent library of reusable prompt gadgets and reviewer runners with compose-prompt tooling",
