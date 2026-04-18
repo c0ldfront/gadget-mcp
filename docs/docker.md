@@ -41,6 +41,70 @@ The container entrypoint is `gadget-mcp --http`. The image hard-codes:
 Everything else from [configuration.md](./configuration.md) still applies —
 pass `-e GADGET_AUTH_TOKENS=...`, `-e GADGET_ORIGIN_ALLOWLIST=...`, etc.
 
+## Volumes and bind-mount ownership
+
+The image runs as the distroless `nonroot` user (uid:gid **65532:65532**)
+and pre-chowns `/data` to that user in the builder stage. Three ways to
+persist `/data`; only the first is unconditionally safe:
+
+### 1. Named volume — the recommended default
+
+```sh
+docker run -d -p 7878:7878 -v gadget-data:/data ghcr.io/c0ldfront/gadget-mcp:v0.3.0
+```
+
+Docker manages the filesystem, so UID 65532 never leaks to your host. This
+is what `compose.yaml` and the `tests/e2e-docker.test.ts` suite use.
+
+### 2. Bind mount + rootless runtime — the modern "host-visible" answer
+
+If you *need* to inspect / edit the DB file from the host, run a rootless
+container runtime so the container's uid 65532 is transparently mapped to
+*your* host uid:
+
+```sh
+# rootless docker (install once): https://docs.docker.com/engine/security/rootless/
+# or podman, which is rootless by default:
+podman run -d -p 7878:7878 -v ./gadget-data:/data ghcr.io/c0ldfront/gadget-mcp:v0.3.0
+ls -l ./gadget-data/gadget.db   # owned by you, not 65532
+```
+
+This is the direction the industry is heading (CNCF tooling, Kubernetes
+user-namespaces GA, Podman/Buildah default). Prefer it over the hacks
+below for any new deployment.
+
+### 3. Bind mount + rootful daemon — only if (1) and (2) aren't available
+
+Pre-chown the host directory **once** to match the container user, then
+let the container write to it:
+
+```sh
+mkdir -p ./gadget-data
+sudo chown -R 65532:65532 ./gadget-data
+docker run -d -p 7878:7878 -v $(pwd)/gadget-data:/data ghcr.io/c0ldfront/gadget-mcp:v0.3.0
+```
+
+You will need `sudo` to read those files back. If you don't want that,
+override the uid at run time:
+
+```sh
+docker run -d -p 7878:7878 \
+  --user $(id -u):$(id -g) \
+  -v $(pwd)/gadget-data:/data \
+  ghcr.io/c0ldfront/gadget-mcp:v0.3.0
+```
+
+`--user` works because SQLite only needs the effective uid to be able to
+write `/data`. Caveat: your uid isn't in the distroless `/etc/passwd`, so
+anything that resolves `getpwuid` would fail — Bun + SQLite don't, but
+keep this in mind if you fork the image. Do **not** `chown` your home
+directory to 65532 to "make it work"; that is the anti-pattern this
+section exists to prevent.
+
+The image deliberately does **not** ship a `PUID` / `PGID` entrypoint
+trick (the linuxserver.io pattern) — that requires a shell, and
+distroless has none by design.
+
 ## Auth
 
 With no `GADGET_AUTH_TOKENS` set, HTTP callers resolve to the `admin` role.
