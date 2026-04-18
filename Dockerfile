@@ -13,7 +13,7 @@ COPY forge.ts ./
 
 RUN bun build ./packages/server/src/cli.ts \
       --compile \
-      --target=bun-linux-x64-musl \
+      --target=bun-linux-x64 \
       --outfile /out/gadget-mcp
 
 FROM gcr.io/distroless/base-debian12:nonroot AS runtime
